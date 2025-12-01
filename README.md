@@ -11,7 +11,7 @@ The method enables stable, global optimization of neural quantum states via Mont
 ## Features
 
 - Real-time evolution of quantum many-body systems via NQS
-- Global time parametrization using Chebyshev basis
+- Smooth parametrization using Chebyshev basis with global optimization
 - Monte Carlo sampling with Metropolis-Hastings algorithm
 - Optimizer: AdamW with PyTorch backend
 
