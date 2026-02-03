@@ -24,7 +24,7 @@ class sNQS:
         self.α = α
         self.Δt = Δt
         self.model = model
-         
+          
         self.Q = θ_qj.shape[0]
         self.Np = θ_qj.shape[1]
         self.K = g_qt.shape[1]

@@ -5,7 +5,7 @@
 # @Last Modified time: 2025-12-01 16:29:24
 import torch as tc
 from rbm import RBM
-
+ 
 
 def Ilocal(bar:RBM, ket:RBM, s_mn:tc.Tensor) -> tc.Tensor:
     return (ket.lnPsi(s_mn) - bar.lnPsi(s_mn)).exp()

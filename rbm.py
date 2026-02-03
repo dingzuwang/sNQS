@@ -8,7 +8,7 @@ import torch as tc
 
 __all__ = ["RBM", "random_θ", "random_θ_qj"]
  
-
+ 
 class RBM():
     def __init__(self, θ:tc.Tensor, N:int, α:int) -> None:
         assert θ.ndim == 1 and θ.numel() == N + α*N + N*α*N

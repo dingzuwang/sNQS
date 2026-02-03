@@ -5,7 +5,7 @@
 # @Last Modified time: 2026-02-03 19:12:09
 import torch as tc
 from rbm import RBM
- 
+  
 
 __all__ = ["random_samples", "Metropolis"]
 

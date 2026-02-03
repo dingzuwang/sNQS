@@ -2,12 +2,12 @@
 # @Author: dzwang
 # @Date:   2025-09-07 15:37:47
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-02-03 19:12:15
+# @Last Modified time: 2026-02-03 19:17:14
 import numpy as np
 import torch as tc
 from rbm import RBM, random_θ, random_θ_qj
 from sampler import random_samples
-
+ 
  
 # * Test parameters
 device = "cuda" if tc.cuda.is_available() else "cpu"

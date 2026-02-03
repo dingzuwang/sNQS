@@ -14,7 +14,7 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 M = tc.randint(low=1, high=10000, size=(1,))
 N = tc.randint(low=2, high=100, size=(1,))
      
-
+ 
 def test_random_samples() -> None:
     s_mn = random_samples(M, N, device)
     assert s_mn.ndim == 2 and s_mn.shape == (M, N)
