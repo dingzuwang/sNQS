@@ -2,10 +2,10 @@
 # @Author: dzwang
 # @Date:   2025-09-12 15:07:21
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-09-30 15:47:14
+# @Last Modified time: 2026-02-03 19:12:02
 import torch as tc
 
-
+ 
 class TIM:
     
     def __init__(self, J:float, hx:float, hz:float) -> None:

@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-12-01 21:43:07
+# @Last Modified time: 2026-02-03 19:12:00
 import numpy as np
 import torch as tc
 from model import TIM
@@ -12,7 +12,7 @@ from snqs import sNQS, time_function
 from sampler import Metropolis, random_samples
 device = "cuda" if tc.cuda.is_available() else "cpu"
 
-
+ 
 def main() -> None:
     tI = 0.5  # time interval
     tW = 2.0  # time window

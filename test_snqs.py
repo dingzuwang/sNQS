@@ -2,14 +2,14 @@
 # @Author: dzwang
 # @Date:   2025-09-09 21:00:18
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-12-01 20:44:51
+# @Last Modified time: 2026-02-03 19:12:19
 import pytest
 import torch as tc
 from model import TIM
 from rbm import RBM, random_θ, random_θ_qj
 from snqs import time_function, sNQS
 device = "cuda" if tc.cuda.is_available() else "cpu"
-
+ 
 
 def test_chebyshev_recurrence() -> None:
     Q = tc.randint(3, 10, (1,)).item()

@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-07 16:14:58
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-09-16 14:49:56
+# @Last Modified time: 2026-02-03 19:12:17
 import pytest
 import itertools
 import torch as tc
@@ -13,7 +13,7 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 
 M = tc.randint(low=1, high=10000, size=(1,))
 N = tc.randint(low=2, high=100, size=(1,))
-    
+     
 
 def test_random_samples() -> None:
     s_mn = random_samples(M, N, device)

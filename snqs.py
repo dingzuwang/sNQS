@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-12-01 16:30:07
+# @Last Modified time: 2026-02-03 19:12:14
 import numpy as np
 import torch as tc
 from rbm import RBM
@@ -24,7 +24,7 @@ class sNQS:
         self.α = α
         self.Δt = Δt
         self.model = model
-        
+         
         self.Q = θ_qj.shape[0]
         self.Np = θ_qj.shape[1]
         self.K = g_qt.shape[1]

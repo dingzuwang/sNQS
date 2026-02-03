@@ -2,12 +2,12 @@
 # @Author: dzwang
 # @Date:   2025-09-06 18:53:53
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-09-16 19:09:07
+# @Last Modified time: 2026-02-03 19:12:04
 import torch as tc
 
 
 __all__ = ["RBM", "random_θ", "random_θ_qj"]
-
+ 
 
 class RBM():
     def __init__(self, θ:tc.Tensor, N:int, α:int) -> None:

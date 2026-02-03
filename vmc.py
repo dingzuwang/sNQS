@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-15 13:32:57
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-12-01 16:30:20
+# @Last Modified time: 2026-02-03 19:12:21
 import torch as tc
 from rbm import RBM
 from sampler import Metropolis
@@ -93,7 +93,7 @@ class VMC:
         r_mn = tc.exp(lnψ_mn - lnψ_m[:, None])
         Eloc = hx * r_mn.sum(dim=1)
         return Eloc
-    
+     
     def energy_Sx_Sz(self, s_mn:tc.Tensor, bonds:tc.Tensor) -> tuple[float, float, float]:
         device = self.device
         ψ = self.ψ

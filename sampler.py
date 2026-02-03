@@ -2,10 +2,10 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:13:09
 # @Last Modified by:   dzwang
-# @Last Modified time: 2025-09-16 15:47:54
+# @Last Modified time: 2026-02-03 19:12:09
 import torch as tc
 from rbm import RBM
-
+ 
 
 __all__ = ["random_samples", "Metropolis"]
 
