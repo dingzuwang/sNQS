@@ -1,9 +1,6 @@
 # sNQS: Smooth Neural Quantum States for Real-Time Evolution
 
-This repository provides the implementation of the **s-NQS** (smooth Neural Quantum States) method proposed in our manuscript:
- 
-> _Continuous-time parametrization of neural quantum states for quantum dynamics_  
-> [Dingzu Wang, arXiv:2507.08418v2 / https://doi.org/10.48550/arXiv.2507.08418]
+This repository provides the implementation of the **s-NQS** (smooth Neural Quantum States) method. 
 
 s-NQS introduces a continuous-time variational ansatz for real-time quantum dynamics using Chebyshev interpolation of neural network parameters. 
 The method enables stable, global optimization of neural quantum states via Monte Carlo sampling.
