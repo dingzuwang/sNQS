@@ -2,19 +2,20 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-02-03 19:17:04
+# @Last Modified time: 2026-03-06 21:39:51
 import numpy as np
 import torch as tc
 from model import TIM
 from rbm import RBM, random_θ, random_θ_qj
 from vmc import VMC
-from snqs import sNQS, time_function
+from snqs import sNQS
+from utils import time_function
 from sampler import Metropolis, random_samples
 device = "cuda" if tc.cuda.is_available() else "cpu"
 
- 
+
 def main() -> None:
-    tI = 0.5  # time interval
+    tI = 0.4  # time interval
     tW = 2.0  # time window
     Δt = 0.01 # time step
     ## get ground state
@@ -35,7 +36,7 @@ def main() -> None:
     θ_qj, Ss, losses, ψfin = snqs.train(ψini, Sini, batch, steps=steps, lr=lr, log_interval=steps//10)
     # measure 
     E, Sx, Sz = snqs.expectation_value(Ss, batch=20*batch)
-
+    
     import matplotlib.pyplot as plt
     fig = plt.figure(figsize=(9, 3))
     ax = fig.add_subplot(1, 2, 1)
@@ -66,15 +67,15 @@ if __name__ == "__main__":
     # --------parameters--------
     model = TIM(J=-1, hx=-0.3, hz=-0.3)
     ## parameters for sampler
-    M = 2000
+    M = 500
     batch = 1
     ## parameters for sNQS
     Lx, Ly = 10, 1
     N = Lx * Ly  # number of spins
-    α = 5
-    Q = 5
+    α = 3
+    Q = 4
     ## parameters for training
-    steps = 500
+    steps = 300
     lr = 1.e-3
     print("Parameters:")
     print(f"Lx={Lx}, Ly={Ly}, N={N}, α={α}, Q={Q}, M={M}, batch={batch}, steps={steps}")

@@ -2,7 +2,8 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-02-03 19:12:14
+# @Last Modified time: 2026-03-07 19:38:37
+import quante
 import numpy as np
 import torch as tc
 from rbm import RBM
@@ -10,10 +11,30 @@ from model import TIM
 from sampler import Metropolis
 
 
-__all__ = ["sNQS", "time_function", "update_Ss"]
+__all__ = ["sNQS", "update_Ss"]
 
 
 class sNQS:
+    r"""
+    The network parameters θ should always be column vector
+    .. math::
+        ._   _.
+        |θ_{1}|
+        |θ_{2}|
+        |  ...|
+        |θ_{J}|
+        `-   -`
+
+    Within sNQS algorithm, we construct network paramters as different time points like
+    .. math::
+        ._      _.     ._                         _.   ._    _.
+        |θ_{1}(t)|     |θ_{1,1} θ_{1,2} ... θ_{1,Q}|   |g_1(t)|
+        |θ_{2}(t)|     |θ_{2,1} θ_{2,2} ... θ_{2,Q}|   |g_2(t)|
+        |  ...   |  =  |                ...            | ...  |
+        |θ_{J}(t)|     |θ_{J,1} θ_{J,2} ... θ_{J,Q}|   |g_Q(t)|
+        `-      -`     `-                         -`   `_    _`
+                                               
+    """
     
     def __init__(self, g_qt:tc.Tensor, θ_qj:tc.Tensor, Lx:int, Ly:int, α:int, Δt:float, model:TIM) -> None:
         self.g_qt = g_qt
@@ -291,15 +312,7 @@ class sNQS:
         return E_m.sum(), Sx_m.sum(), Sz_m.sum()
     
     
-def time_function(Q:int, t0:float, tK:float, Δt:float, tW:float, *, device) -> tc.Tensor:
-    N_times = int(round((tK - t0) / Δt)) + 1
-    ts = t0 + Δt * tc.arange(N_times, device=device, dtype=tc.float64)
-    xs = (2.0 * ts / tW) - 1.0
-    xs = xs.clamp(-1.0, 1.0)
-    θ = tc.arccos(xs)
-    q = tc.arange(Q, device=device, dtype=tc.float64)
-    g_qt = tc.cos(q[:, None] * θ[None, :])
-    return ts, g_qt.to(tc.complex128)
+
 
 
 @tc.no_grad()
