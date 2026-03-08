@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-07 19:38:37
+# @Last Modified time: 2026-03-08 15:59:08
 import quante
 import numpy as np
 import torch as tc
@@ -11,10 +11,10 @@ from model import TIM
 from sampler import Metropolis
 
 
-__all__ = ["sNQS", "update_Ss"]
+__all__ = ["sNQS_rbm", "update_Ss"]
 
 
-class sNQS:
+class sNQS_rbm:
     r"""
     The network parameters θ should always be column vector
     .. math::
@@ -25,60 +25,61 @@ class sNQS:
         |θ_{J}|
         `-   -`
 
-    Within sNQS algorithm, we construct network paramters as different time points like
+    Within sNQS_rbm algorithm, we construct network paramters as different time points like
     .. math::
         ._      _.     ._                         _.   ._    _.
         |θ_{1}(t)|     |θ_{1,1} θ_{1,2} ... θ_{1,Q}|   |g_1(t)|
         |θ_{2}(t)|     |θ_{2,1} θ_{2,2} ... θ_{2,Q}|   |g_2(t)|
         |  ...   |  =  |                ...            | ...  |
         |θ_{J}(t)|     |θ_{J,1} θ_{J,2} ... θ_{J,Q}|   |g_Q(t)|
-        `-      -`     `-                         -`   `_    _`
-                                               
+        `-      -`     `-                         -`   `_    _`                
     """
     
-    def __init__(self, g_qt:tc.Tensor, θ_qj:tc.Tensor, Lx:int, Ly:int, α:int, Δt:float, model:TIM) -> None:
+    def __init__(self, θ_jq:tc.Tensor, g_qt:tc.Tensor, Lx:int, Ly:int, α:int, Δt:float, model:TIM) -> None:
+        self.θ_jq = θ_jq
         self.g_qt = g_qt
-        self.θ_qj = θ_qj
         self.Lx = Lx
         self.Ly = Ly
         self.N = Lx * Ly
         self.α = α
         self.Δt = Δt
         self.model = model
-          
-        self.Q = θ_qj.shape[0]
-        self.Np = θ_qj.shape[1]
+        
+        self.Np = θ_jq.shape[0]  # number of paramters in each network
         self.K = g_qt.shape[1]
-        self.device = θ_qj.device
+        self.device = θ_jq.device
     
     @property
-    def ψS(self) -> list[RBM]:
-        θ_jt = self.θ_qj.T @ self.g_qt
+    def ψs(self) -> list[RBM]:  # 's' labels time
+        θ_jt = self.θ_jq @ self.g_qt
         return [RBM(θ_jt[:, k].contiguous(), self.N, self.α) for k in range(self.K)]
     
-    def train(self, ψini:RBM, Sini:tc.Tensor, batch:int, *, steps:int, lr:float, ema_alpha:float=0.95,
-        log_interval:int) -> tuple[tc.Tensor, list[tc.Tensor], list[float], RBM]:
+    def train(self,
+        ψini:RBM, Sini:tc.Tensor, batch:int, 
+        *, 
+        steps:int, lr:float, ema_alpha:float=0.95, log_interval:int
+    ) -> tuple[tc.Tensor, list[tc.Tensor], list[float], RBM]:
         
-        # initial samples for each ψk
-        ψS = self.ψS
+        # initialized MC-samples for each network ψk
+        ψs = self.ψs
         Ss = [Sini.clone() for _ in range(self.K)]
-        Ss = update_Ss(ψS, Ss, sweep=100*self.N)
+        Ss = update_Ss(ψs, Ss, sweep=50*self.N)
         
-        # make sure 'θ_qj' is a leaf param and define the optimizer
-        if not isinstance(self.θ_qj, tc.nn.Parameter):
-            self.θ_qj = tc.nn.Parameter(self.θ_qj, requires_grad=True)
-        param = self.θ_qj
-        assert id(param) == id(self.θ_qj)
+        # make sure 'θ_jq' is a leaf param and define the optimizer
+        if not isinstance(self.θ_jq, tc.nn.Parameter):
+            self.θ_jq = tc.nn.Parameter(self.θ_jq, requires_grad=True)
+        param = self.θ_jq
+        assert id(param) == id(self.θ_jq)
         optimizer = tc.optim.AdamW([param], lr=lr, weight_decay=1e-5, amsgrad=True)
         scheduler = tc.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=300, cooldown=41, factor=0.5, min_lr=1.e-6)
         
-        losses = []
+        losses = []  # 'es' labels time
         ema = None
         for epoch in range(1, steps+1):
             with tc.no_grad():
-                ψS = self.ψS
-                Ss = update_Ss(ψS, Ss, sweep=2*self.N)
-                grad, loss = self.grad_qj(ψini, ψS, Ss, batch)  # grad: complex (Q, Np), loss: float
+                ψs = self.ψs
+                Ss = update_Ss(ψs, Ss, sweep=self.N)
+                grad, loss = self.grad_jq(ψini, ψs, Ss, batch)  # grad: complex (Np, Q); loss: float
                 if grad.dtype != param.dtype or grad.device != param.device:
                     grad = grad.to(dtype=param.dtype, device=param.device)
                 
@@ -100,28 +101,33 @@ class sNQS:
                       f"loss={loss:.6g}, ema={ema:.6g} "
                       f"lr={optimizer.param_groups[0]['lr']:.3g}")
         
-        ψfinal = self.ψS[-1]
-        return self.θ_qj.detach().clone(), Ss, np.array(losses), ψfinal
+        ψfinal = self.ψs[-1]
+        return self.θ_jq.detach().clone(), Ss, np.array(losses), ψfinal
     
     @tc.no_grad()
-    def grad_qj(self, ψini:RBM, ψS:list[RBM], Ss:list[tc.Tensor], batch:int) -> tuple[tc.Tensor, float]:
+    def grad_jq(self, ψini:RBM, ψs:list[RBM], Ss:list[tc.Tensor], batch:int) -> tuple[tc.Tensor, float]:
         g_qt = self.g_qt
-        grad = tc.zeros_like(self.θ_qj, device=self.device)   # (Q, Np)
+        grad = tc.zeros_like(self.θ_jq, device=self.device)   # (Q, Np)
         loss = 1.
+        
         ## first term
-        G_0, C_0 = self.dC_init(Ss[0], ψS[0], ψini, batch)
-        grad += tc.outer(g_qt[:, 0], G_0)
+        G_0, C_0 = self.dC_init(Ss[0], ψs[0], ψini, batch)
+        grad += G_0.reshape(-1, 1) @ g_qt[:, 0].reshape(1, -1)
         loss *= C_0
-        ## another terms 
+        
+        ## other terms 
+        ### Taylor expansion
         for k in range(self.K):
-            ψkm1 = ψS[k-1] if k > 0 else None
-            ψkp1 = ψS[k+1] if k < self.K-1 else None
-            G_prev, G_next, C_prev, C_next = self.dC_pair(Ss[k], ψS[k], ψkm1, ψkp1, batch)  # (Np,), (Np,)
+            ψkm1 = ψs[k-1] if k > 0 else None
+            ψkp1 = ψs[k+1] if k < self.K-1 else None
+            G_prev, G_next, C_prev, C_next = self.dC_pair(Ss[k], ψs[k], ψkm1, ψkp1, batch)  # (Np,), (Np,)
             if G_prev is not None:
-                grad += tc.outer(g_qt[:, k], G_prev)
+                # grad += tc.outer(g_qt[:, k], G_prev)
+                grad += G_prev.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_prev
             if G_next is not None:
-                grad += tc.outer(g_qt[:, k], G_next)
+                # grad += tc.outer(g_qt[:, k], G_next)
+                grad += G_next.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_next
         loss = np.abs(1. - loss)
         return grad, loss
@@ -132,19 +138,23 @@ class sNQS:
         sum_Or0 = tc.zeros(self.Np, dtype=tc.complex128, device=self.device)
         sum_r0 = tc.zeros((), dtype=tc.complex128, device=self.device)
         _sum_r0 = tc.zeros((), dtype=tc.complex128, device=self.device)
-    
+        
         S0 = S0.clone()
         for _ in range(batch):
             S0 = Metropolis(S0, ψ0, sweep=self.N)
-            O_mj = ψ0.d_lnPsi(S0).conj()  # (M, P)
-            ## r0_m = <ψ0|ψinit>/<ψ0|ψ0>
-            r0_m = tc.exp(ψinit.lnPsi(S0) - ψ0.lnPsi(S0))  # (M,)
-            sum_O += O_mj.sum(dim=0)
-            sum_r0 += r0_m.sum()
-            sum_Or0 += (O_mj * r0_m[:, None]).sum(dim=0)
-            ## _r0_m = <ψinit|ψ0>/<ψinit|ψinit>
-            _r0_m = tc.exp(ψ0.lnPsi(S0) - ψinit.lnPsi(S0))  # (M,)
-            _sum_r0 += _r0_m.sum()
+            O_mj = ψ0.d_lnPsi(S0).conj()  # (Nmc, Np)
+            ##        <ψ0|ψinit>
+            ## r0_m = ----------
+            ##        <ψ0|ψ0>
+            r0_m = tc.exp(ψinit.lnPsi(S0) - ψ0.lnPsi(S0))  # (Nmc,)
+            sum_O += O_mj.sum(dim=0)  # (, Np)
+            sum_r0 += r0_m.sum()  # (, 1)
+            sum_Or0 += (O_mj * r0_m[:, None]).sum(dim=0) # (, Np)
+            ##         <ψinit|ψ0>
+            ## _r0_m = ------------
+            ##         <ψinit|ψinit>
+            _r0_m = tc.exp(ψ0.lnPsi(S0) - ψinit.lnPsi(S0))  # (Nmc,)
+            _sum_r0 += _r0_m.sum()  # (, 1)
         
         Nmc = S0.shape[0] * batch
         mean_O = sum_O / Nmc
@@ -156,7 +166,7 @@ class sNQS:
         G0  = cov / mean_r0
         C0 = (mean_r0 * _mean_r0).item()
         return G0, C0
-        
+    
     @tc.no_grad()
     def dC_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM|None, ψkp1:RBM|None, batch:int) -> tuple[tc.Tensor|None, tc.Tensor|None]:
         Np = self.Np
@@ -169,8 +179,8 @@ class sNQS:
         Sk = Sk.clone()
         for _ in range(batch):
             Sk = Metropolis(Sk, ψk, sweep=self.N)
-            O_mj = ψk.d_lnPsi(Sk).conj()  # (M, P)
-            U_prev, U_next = self.Uloc_pair(Sk, ψk, ψkm1, ψkp1)  # (M,)
+            O_mj = ψk.d_lnPsi(Sk).conj()  # (Nmc, Np)
+            U_prev, U_next = self.Uloc_pair(Sk, ψk, ψkm1, ψkp1)  # (Nmc,)
             
             sum_O += O_mj.sum(dim=0)
             if ψkm1 is not None:
@@ -198,7 +208,7 @@ class sNQS:
     
     @tc.no_grad()
     def Uloc_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM) -> tuple[tc.Tensor, tc.Tensor]:
-        Nmc, N = Sk.shape
+        Nmc, N = Sk.shape  # Nmc: number of MC samples; N: number of spins
         Δt, model, device = self.Δt, self.model, self.device
         J, hx, hz = model.J, model.hx, model.hz
         bonds = model.bonds(self.Lx, self.Ly).to(device=device, dtype=tc.long)
@@ -262,15 +272,15 @@ class sNQS:
     @tc.no_grad()       
     def expectation_value(self, Ss:list[tc.Tensor], batch:int) -> tuple[list, list, list]:
         K = self.K
-        ψS = self.ψS
-        assert len(Ss) == len(ψS) == K
+        ψs = self.ψs
+        assert len(Ss) == len(ψs) == K
         bonds = self.model.bonds(self.Lx, self.Ly).to(device=self.device, dtype=tc.long)
         
         Nmc = Ss[0].shape[0] * batch
         E_k, Sx_k, Sz_k = [], [], []
 
         for k in range(self.K):
-            Sk, ψk = Ss[k], ψS[k]
+            Sk, ψk = Ss[k], ψs[k]
             sum_E, sum_Sx, sum_Sz = 0., 0., 0.
         
             # before the inner accumulation loop
@@ -310,13 +320,10 @@ class sNQS:
         ## energy
         E_m = J*(Sk[:,bonds[:,0]] * Sk[:,bonds[:,1]]).sum(dim=1) + hz*Sz_m + hx*Sx_m  # (Mmc,)
         return E_m.sum(), Sx_m.sum(), Sz_m.sum()
-    
-    
-
 
 
 @tc.no_grad()
-def update_Ss(ψS:list[RBM], Ss:list[tc.Tensor], sweep:int) -> list[tc.Tensor]:
+def update_Ss(ψs:list[RBM], Ss:list[tc.Tensor], sweep:int) -> list[tc.Tensor]:
     K = len(Ss)
-    assert len(Ss) == len(ψS)
-    return [Metropolis(Ss[k], ψS[k], sweep) for k in range(K)]
+    assert len(Ss) == len(ψs)
+    return [Metropolis(Ss[k], ψs[k], sweep) for k in range(K)]

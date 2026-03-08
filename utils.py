@@ -2,14 +2,14 @@
 # @Author: dzwang
 # @Date:   2025-09-09 17:28:58
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-07 19:45:29
+# @Last Modified time: 2026-03-07 19:53:25
 import numpy as np
 import torch as tc
 from rbm import RBM
 
 
-def get_g_qt(t:float|np.ndarray, Q:int, device="cpu", type="simple") -> tc.Tensor:
-    if type == "simple":
+def get_g_qt(t:float|np.ndarray, Q:int, device="cpu", basis_type="simple") -> tc.Tensor:
+    if basis_type == "simple":
         return _simple_polynomial(t, Q=Q, device=device)
 
 def _simple_polynomial(t, Q, device="cpu") -> tc.Tensor:

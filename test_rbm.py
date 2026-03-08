@@ -2,10 +2,9 @@
 # @Author: dzwang
 # @Date:   2025-09-07 15:37:47
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-02-03 19:17:14
-import numpy as np
+# @Last Modified time: 2026-03-07 21:57:37
 import torch as tc
-from rbm import RBM, random_θ, random_θ_qj
+from rbm import RBM, random_θ, random_θ_jq
 from sampler import random_samples
  
  
@@ -15,29 +14,25 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 N = tc.randint(low=1, high=100, size=(1,))
 α = tc.randint(low=1, high=10, size=(1,))
 ## Parameters to generate Samples
-M = tc.randint(low=1, high=1000, size=(1,)) * 6
+M = tc.randint(low=1, high=1000, size=(1,)) * 6  # must be a multiple of 6 for testing lnPsi shape using MC
 
 
 def test_random_θ() -> None:
-    N = tc.randint(low=1, high=100, size=(1,))
-    α = tc.randint(low=1, high=10, size=(1,))
-    test_θ = random_θ(N, α, device)
-    assert test_θ.ndim == 1
-    assert test_θ.shape[0] == N + α*N + N*α*N
-    assert test_θ.dtype == tc.complex128
-    assert test_θ.device.type == device
-    
-    
-def test_random_θ_qj() -> None:
+    θ = random_θ(N, α, device)
+    assert θ.ndim == 1
+    assert θ.shape[0] == N + α*N + N*α*N
+    assert θ.dtype == tc.complex128
+    assert θ.device.type == device
+
+
+def test_random_θ_jq() -> None:
     Q = tc.randint(low=2, high=10, size=(1,))
-    N = tc.randint(low=1, high=100, size=(1,))
-    α = tc.randint(low=1, high=10, size=(1,))
-    test_θ_qj = random_θ_qj(Q, N, α, device)
-    assert test_θ_qj.ndim == 2
-    assert test_θ_qj.shape[0] == Q
-    assert test_θ_qj.shape[1] == N + α*N + N*α*N
-    assert test_θ_qj.dtype == tc.complex128
-    assert test_θ_qj.device.type == device
+    θ_jq = random_θ_jq(Q, N, α, device)
+    assert θ_jq.ndim == 2
+    assert θ_jq.shape[1] == Q
+    assert θ_jq.shape[0] == N + α*N + N*α*N
+    assert θ_jq.dtype == tc.complex128
+    assert θ_jq.device.type == device
     
 
 def test_rbm_parameters_shape() -> None:

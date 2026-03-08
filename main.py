@@ -2,20 +2,22 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-06 21:39:51
+# @Last Modified time: 2026-03-08 15:52:07
+from sqlite3 import SQLITE_DBCONFIG_DQS_DDL
+
 import numpy as np
 import torch as tc
 from model import TIM
-from rbm import RBM, random_θ, random_θ_qj
+from rbm import RBM, random_θ, random_θ_jq
 from vmc import VMC
-from snqs import sNQS
+from snqs import sNQS_rbm
 from utils import time_function
 from sampler import Metropolis, random_samples
 device = "cuda" if tc.cuda.is_available() else "cpu"
 
 
 def main() -> None:
-    tI = 0.4  # time interval
+    tI = 0.5  # time interval
     tW = 2.0  # time window
     Δt = 0.01 # time step
     ## get ground state
@@ -24,16 +26,16 @@ def main() -> None:
     θ_rand = random_θ(N=N, α=α, device=device)
     S_rand = random_samples(M, N, device)
     vmc = VMC(θ_rand, Lx, Ly, α, model=TIM(0., -1., 0.))
-    ψini, Sini = vmc.train(S_rand, batch, steps=1000, lr=1.e-2, log_interval=100)
-    θ_qj = random_θ_qj(Q, N, α, device)
-    # sNQS runing...
+    ψini, Sini = vmc.train(S_rand, batch, steps=100, lr=1.e-2, log_interval=100)
+    θ_jq = random_θ_jq(Q, N, α, device)
+    # sNQS_rbm runing...
     print("-"*20)
-    print("sNQS time evolution...")
+    print("sNQS_rbm time evolution...")
     t0, tK = 0., tI
     ts, g_qt = time_function(Q, t0, tK, Δt, tW, device=device)
     print(f"times = {ts.cpu().numpy()}")
-    snqs = sNQS(g_qt, θ_qj, Lx, Ly, α, Δt, model)
-    θ_qj, Ss, losses, ψfin = snqs.train(ψini, Sini, batch, steps=steps, lr=lr, log_interval=steps//10)
+    snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, Δt, model)
+    θ_jq, Ss, losses, ψfin = snqs.train(ψini, Sini, batch, steps=steps, lr=lr, log_interval=steps//10)
     # measure 
     E, Sx, Sz = snqs.expectation_value(Ss, batch=20*batch)
     
@@ -42,14 +44,14 @@ def main() -> None:
     ax = fig.add_subplot(1, 2, 1)
     ts = ts.cpu()
     Sx, Sz = np.array(Sx)/N, np.array(Sz)/N
-    ax.plot(ts, Sx, '-', label='sNQS')
+    ax.plot(ts, Sx, '-', label='sNQS_rbm')
     ax.plot(ts_exact, Sx_exact, '.', label='ED')
     ax.set_xlim(0, tW)
     ax.set_xlabel('Time')
     ax.set_ylabel(r'$\langle \sigma_x \rangle$')
     ax.legend()
     ax = fig.add_subplot(1, 2, 2)
-    ax.plot(ts, Sz, '-', label='sNQS')
+    ax.plot(ts, Sz, '-', label='sNQS_rbm')
     ax.plot(ts_exact, Sz_exact, '.', label='ED')
     ax.set_xlim(0, tW)
     ax.set_xlabel('Time')
@@ -69,13 +71,13 @@ if __name__ == "__main__":
     ## parameters for sampler
     M = 500
     batch = 1
-    ## parameters for sNQS
+    ## parameters for sNQS_rbm
     Lx, Ly = 10, 1
     N = Lx * Ly  # number of spins
     α = 3
-    Q = 4
+    Q = 3
     ## parameters for training
-    steps = 300
+    steps = 200
     lr = 1.e-3
     print("Parameters:")
     print(f"Lx={Lx}, Ly={Ly}, N={N}, α={α}, Q={Q}, M={M}, batch={batch}, steps={steps}")

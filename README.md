@@ -1,4 +1,4 @@
-# sNQS: Smooth Neural Quantum States for Real-Time Evolution
+# sNQS_rbm: Smooth Neural Quantum States for Real-Time Evolution
 
 This repository provides the implementation of the **s-NQS** (smooth Neural Quantum States) method. 
 
@@ -16,7 +16,7 @@ The method enables stable, global optimization of neural quantum states via Mont
 
 - `model.py` — Defines system Hamiltonians
 - `rbm.py` — Restricted Boltzmann Machine architecture
-- `snqs.py` — s-NQS evolution with Chebyshev basis
+- `sNQS_rbm.py` — s-NQS evolution with Chebyshev basis
 - `sampler.py` — MCMC sampler implementation
 - `utils.py` — Utility functions
 - `vmc.py` — Variational Monte Carlo utilities

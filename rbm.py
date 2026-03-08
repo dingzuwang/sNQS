@@ -2,11 +2,11 @@
 # @Author: dzwang
 # @Date:   2025-09-06 18:53:53
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-02-03 19:12:04
+# @Last Modified time: 2026-03-07 21:51:34
 import torch as tc
 
 
-__all__ = ["RBM", "random_θ", "random_θ_qj"]
+__all__ = ["RBM", "random_θ", "random_θ_jq"]
  
  
 class RBM():
@@ -59,12 +59,9 @@ def random_θ(N:int, α:int, device:str) -> tc.Tensor:
     return θ
 
 
-def random_θ_qj(Q:int, N:int, α:int, device:str) -> tc.Tensor:
+def random_θ_jq(Q:int, N:int, α:int, device:str) -> tc.Tensor:
     Np = N + α*N + N*α*N
-    real_part = tc.randn((Q, Np), dtype=tc.float64, device=device)
-    imag_part = tc.randn((Q, Np), dtype=tc.float64, device=device)
+    real_part = tc.randn((Np, Q), dtype=tc.float64, device=device)
+    imag_part = tc.randn((Np, Q), dtype=tc.float64, device=device)
     θ = (real_part + 1j*imag_part) * 1.e-3
-    return θ 
-
-
-
+    return θ
