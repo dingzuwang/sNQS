@@ -2,7 +2,8 @@
 # @Author: dzwang
 # @Date:   2026-03-06 22:18:13
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-08 15:16:58
+# @Last Modified time: 2026-03-09 11:41:46
+from numpy._typing._array_like import NDArray
 import torch as tc
 import numpy as np
 device = "cuda" if tc.cuda.is_available() else "cpu"
@@ -12,24 +13,20 @@ from rbm import *
 from model import *
 from sampler import *
 from vmc import *
+import math
+
+def LPE_coeffs(order: int) -> np.ndarray:
+    poly_desc = [1 / math.factorial(k) for k in range(order, -1, -1)]
+    roots = np.roots(poly_desc)
+    a_ms = -1.0 / roots
+    return a_ms
 
 
-Δt = 0.01
-N = 10
-α = 5
-Q = 4
-t = np.array([2, 3])
-g_qt = get_g_qt(t, Q, device, basis_type="simple")
-θ_jq = random_θ_jq(Q, N, α, device=device)
-snqs = sNQS_rbm(θ_jq, g_qt, Lx=N, Ly=1, α=α, Δt=Δt, model= TIM(J=-1, hx=-0.3, hz=-0.3))
-
-Lx, Ly = 10, 1
-M = 100
-batch = 1
-θ_rand = random_θ(N=N, α=α, device=device)
-S_rand = random_samples(M, N, device)
-vmc = VMC(θ_rand, Lx, Ly, α, model=TIM(0., -1., 0.))
-ψini, Sini = vmc.train(S_rand, batch, steps=10, lr=1.e-2, log_interval=100)
-
-snqs.train(ψini, Sini, batch, steps=1, lr=1.e-2, log_interval=10)
-
+a_ms = LPE_coeffs(order=4)
+print(a_ms)
+t_nodes, a_links, phy_idx = get_LPE_time_grid(t0=0.0, tK=0.3, dt=0.1, a_ms=a_ms)
+print(t_nodes)
+print(a_links)
+print(phy_idx)
+g_qt = get_g_qt(t_nodes, Q=3, device="cpu", basis_type="simple")
+print(g_qt)

@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-08 15:59:08
+# @Last Modified time: 2026-03-08 21:33:27
 import quante
 import numpy as np
 import torch as tc
@@ -35,7 +35,12 @@ class sNQS_rbm:
         `-      -`     `-                         -`   `_    _`                
     """
     
-    def __init__(self, θ_jq:tc.Tensor, g_qt:tc.Tensor, Lx:int, Ly:int, α:int, Δt:float, model:TIM) -> None:
+    # def __init__(self, θ_jq:tc.Tensor, g_qt:tc.Tensor, Lx:int, Ly:int, α:int, Δt:float, model:TIM) -> None:
+    def __init__(self, θ_jq: tc.Tensor, g_qt: tc.Tensor, Lx: int, Ly: int, α: int, Δt: float, model: TIM,
+        *,
+        scheme: str = "taylor",
+        a_links: tc.Tensor | None = None,
+        physical_indices: list[int] | None = None) -> None:
         self.θ_jq = θ_jq
         self.g_qt = g_qt
         self.Lx = Lx
@@ -48,18 +53,20 @@ class sNQS_rbm:
         self.Np = θ_jq.shape[0]  # number of paramters in each network
         self.K = g_qt.shape[1]
         self.device = θ_jq.device
+        
+        self.scheme = scheme
+        self.a_links = a_links
+        self.physical_indices = physical_indices
     
     @property
     def ψs(self) -> list[RBM]:  # 's' labels time
         θ_jt = self.θ_jq @ self.g_qt
         return [RBM(θ_jt[:, k].contiguous(), self.N, self.α) for k in range(self.K)]
     
-    def train(self,
-        ψini:RBM, Sini:tc.Tensor, batch:int, 
-        *, 
-        steps:int, lr:float, ema_alpha:float=0.95, log_interval:int
-    ) -> tuple[tc.Tensor, list[tc.Tensor], list[float], RBM]:
-        
+    def train(self, ψini:RBM, Sini:tc.Tensor, batch:int, 
+              *,
+              steps:int, lr:float, ema_alpha:float=0.95, log_interval:int
+              ) -> tuple[tc.Tensor, list[tc.Tensor], list[float], RBM]:
         # initialized MC-samples for each network ψk
         ψs = self.ψs
         Ss = [Sini.clone() for _ in range(self.K)]
@@ -107,7 +114,7 @@ class sNQS_rbm:
     @tc.no_grad()
     def grad_jq(self, ψini:RBM, ψs:list[RBM], Ss:list[tc.Tensor], batch:int) -> tuple[tc.Tensor, float]:
         g_qt = self.g_qt
-        grad = tc.zeros_like(self.θ_jq, device=self.device)   # (Q, Np)
+        grad = tc.zeros_like(self.θ_jq, device=self.device)   # (Np, Q)
         loss = 1.
         
         ## first term
@@ -207,7 +214,20 @@ class sNQS_rbm:
         return G_prev, G_next, C_prev, C_next
     
     @tc.no_grad()
-    def Uloc_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM) -> tuple[tc.Tensor, tc.Tensor]:
+    def Uloc_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM, 
+                  *, a_prev=None, a_next=None) -> tuple[tc.Tensor, tc.Tensor]:
+        if self.scheme == "taylor":
+            return self.Uloc_pair_taylor(Sk, ψk, ψkm1, ψkp1)
+        elif self.scheme == "lpe":
+            return self.Uloc_pair_lpe(Sk, ψk, ψkm1, ψkp1, a_prev=a_prev, a_next=a_next)
+        
+    @tc.no_grad()
+    def Uloc_pair_lpe(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM, 
+                      *, a_prev=None, a_next=None) -> tuple[tc.Tensor, tc.Tensor]:
+        raise NotImplementedError("LPE propagator is not implemented yet.")
+    
+    @tc.no_grad()
+    def Uloc_pair_taylor(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM) -> tuple[tc.Tensor, tc.Tensor]:
         Nmc, N = Sk.shape  # Nmc: number of MC samples; N: number of spins
         Δt, model, device = self.Δt, self.model, self.device
         J, hx, hz = model.J, model.hx, model.hz
@@ -251,7 +271,7 @@ class sNQS_rbm:
             if ψj is None:
                 return None
             lnψj_m = ψj.lnPsi(Sk)  # (Nmc,)
-            # 0th order
+            # 0th order 
             r_m = tc.exp(lnψj_m - lnψk_m)  # (Nmc,)
             # 1st order: (+ or -) iΔtH 
             lnψj_mn = ψj.lnPsi(S_flip2d).reshape(Nmc, N)  # (Nmc, N)

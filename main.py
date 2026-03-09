@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-08 15:52:07
+# @Last Modified time: 2026-03-08 20:58:52
 from sqlite3 import SQLITE_DBCONFIG_DQS_DDL
 
 import numpy as np
@@ -17,7 +17,7 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 
 
 def main() -> None:
-    tI = 0.5  # time interval
+    tI = 0.4  # time interval
     tW = 2.0  # time window
     Δt = 0.01 # time step
     ## get ground state
