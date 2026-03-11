@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-09 17:28:58
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-09 11:41:57
+# @Last Modified time: 2026-03-09 13:34:13
 import math
 import numpy as np
 import torch as tc
@@ -30,15 +30,18 @@ def _simple_polynomial(t, Q, device="cpu") -> tc.Tensor:
         `-                -`
         -> time propagating
     """
-    t = tc.as_tensor(t, dtype=tc.complex128, device=device)
-    qs = tc.arange(Q, dtype=tc.float64, device=device)
+    dtype = tc.complex128
+    t = tc.as_tensor(t, dtype=dtype, device=device)
+    qs = tc.arange(Q, device=device)
     if t.ndim == 0:
-        return t ** qs
-    # elif t.ndim == 1:
-    #     return t[None,...] ** qs[...,None]
+        g_qt = tc.empty(Q, dtype=dtype, device=device)
+        g_qt[0] = 1.0 + 0.0j
+        if Q > 1:
+            g_qt[1:] = t ** qs[1:]
+        return g_qt
     elif t.ndim == 1:
         Nt = t.numel()
-        g_qt = tc.empty((Q, Nt), dtype=tc.complex128, device=device)
+        g_qt = tc.empty((Q, Nt), dtype=dtype, device=device)
         g_qt[0, :] = 1.0 + 0.0j
         if Q > 1:
             g_qt[1:, :] = t[None, :] ** qs[1:, None]

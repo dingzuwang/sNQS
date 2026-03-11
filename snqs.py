@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-08 21:33:27
+# @Last Modified time: 2026-03-09 14:17:37
 import quante
 import numpy as np
 import torch as tc
@@ -35,12 +35,11 @@ class sNQS_rbm:
         `-      -`     `-                         -`   `_    _`                
     """
     
-    # def __init__(self, θ_jq:tc.Tensor, g_qt:tc.Tensor, Lx:int, Ly:int, α:int, Δt:float, model:TIM) -> None:
     def __init__(self, θ_jq: tc.Tensor, g_qt: tc.Tensor, Lx: int, Ly: int, α: int, Δt: float, model: TIM,
         *,
         scheme: str = "taylor",
         a_links: tc.Tensor | None = None,
-        physical_indices: list[int] | None = None) -> None:
+        phy_idx: list[int] | None = None) -> None:
         self.θ_jq = θ_jq
         self.g_qt = g_qt
         self.Lx = Lx
@@ -56,7 +55,7 @@ class sNQS_rbm:
         
         self.scheme = scheme
         self.a_links = a_links
-        self.physical_indices = physical_indices
+        self.phy_idx = phy_idx
     
     @property
     def ψs(self) -> list[RBM]:  # 's' labels time
@@ -123,11 +122,12 @@ class sNQS_rbm:
         loss *= C_0
         
         ## other terms 
-        ### Taylor expansion
         for k in range(self.K):
             ψkm1 = ψs[k-1] if k > 0 else None
             ψkp1 = ψs[k+1] if k < self.K-1 else None
-            G_prev, G_next, C_prev, C_next = self.dC_pair(Ss[k], ψs[k], ψkm1, ψkp1, batch)  # (Np,), (Np,)
+            a_prev = self.a_links[k-1] if (self.scheme == "lpe" and k > 0) else None
+            a_next = self.a_links[k]   if (self.scheme == "lpe" and k < self.K-1) else None
+            G_prev, G_next, C_prev, C_next = self.dC_pair(Ss[k], ψs[k], ψkm1, ψkp1, batch, a_prev=a_prev, a_next=a_next)
             if G_prev is not None:
                 # grad += tc.outer(g_qt[:, k], G_prev)
                 grad += G_prev.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
@@ -175,7 +175,17 @@ class sNQS_rbm:
         return G0, C0
     
     @tc.no_grad()
-    def dC_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM|None, ψkp1:RBM|None, batch:int) -> tuple[tc.Tensor|None, tc.Tensor|None]:
+    def dC_pair(
+        self,
+        Sk: tc.Tensor,
+        ψk: RBM,
+        ψkm1: RBM | None,
+        ψkp1: RBM | None,
+        batch: int,
+        *,
+        a_prev=None,
+        a_next=None,
+    ) -> tuple[tc.Tensor | None, tc.Tensor | None]:
         Np = self.Np
         device = self.device
         sum_O = tc.zeros(Np, dtype=tc.complex128, device=device)
@@ -187,7 +197,8 @@ class sNQS_rbm:
         for _ in range(batch):
             Sk = Metropolis(Sk, ψk, sweep=self.N)
             O_mj = ψk.d_lnPsi(Sk).conj()  # (Nmc, Np)
-            U_prev, U_next = self.Uloc_pair(Sk, ψk, ψkm1, ψkp1)  # (Nmc,)
+            # U_prev, U_next = self.Uloc_pair(Sk, ψk, ψkm1, ψkp1)  # (Nmc,)
+            U_prev, U_next = self.Uloc_pair(Sk, ψk, ψkm1, ψkp1, a_prev=a_prev, a_next=a_next)
             
             sum_O += O_mj.sum(dim=0)
             if ψkm1 is not None:
@@ -214,17 +225,61 @@ class sNQS_rbm:
         return G_prev, G_next, C_prev, C_next
     
     @tc.no_grad()
-    def Uloc_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM, 
-                  *, a_prev=None, a_next=None) -> tuple[tc.Tensor, tc.Tensor]:
+    def Uloc_pair(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM, *, a_prev=None, a_next=None) -> tuple[tc.Tensor, tc.Tensor]:
         if self.scheme == "taylor":
             return self.Uloc_pair_taylor(Sk, ψk, ψkm1, ψkp1)
         elif self.scheme == "lpe":
             return self.Uloc_pair_lpe(Sk, ψk, ψkm1, ψkp1, a_prev=a_prev, a_next=a_next)
-        
+    
     @tc.no_grad()
-    def Uloc_pair_lpe(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM, 
-                      *, a_prev=None, a_next=None) -> tuple[tc.Tensor, tc.Tensor]:
-        raise NotImplementedError("LPE propagator is not implemented yet.")
+    def Uloc_pair_lpe(
+        self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM,
+        *,
+        a_prev=None, a_next=None
+    ) -> tuple[tc.Tensor, tc.Tensor]:
+        
+        Nmc, N = Sk.shape  # number of MC samples; number of spins
+        Δt, model, device = self.Δt, self.model, self.device
+        J, hx, hz = model.J, model.hx, model.hz
+        bonds = model.bonds(self.Lx, self.Ly).to(device=device, dtype=tc.long)
+        
+        def _Ediag(s_mn: tc.Tensor) -> tc.Tensor:
+            s_mn = s_mn.real.to(tc.float64)
+            i, j = bonds[:, 0], bonds[:, 1]
+            zz_pair = s_mn[:, i] * s_mn[:, j]
+            return J * zz_pair.sum(dim=1) + hz * s_mn.sum(dim=1)   # (Nmc,)
+        
+        ### current time point 'tk' for ψ
+        lnψk_m = ψk.lnPsi(Sk)  # (Nmc,)
+        Ediag_m = _Ediag(Sk)  # (Nmc,)
+        ### s_mnn
+        S_flip = Sk[:, None, :].expand(Nmc, N, N).clone()
+        idx = tc.arange(N, device=device)
+        S_flip[:, idx, idx] *= -1
+        S_flip2d = S_flip.reshape(-1, N)  # (Nmc*N, N)
+
+        def build(ψj: RBM, coeff) -> tc.Tensor | None:
+            if ψj is None or coeff is None:
+                return None
+            lnψj_m = ψj.lnPsi(Sk)  # (Nmc,)
+            r_m = tc.exp(lnψj_m - lnψk_m)  # (Nmc,)
+            lnψj_mn = ψj.lnPsi(S_flip2d).reshape(Nmc, N)  # (Nmc, N)
+            r_mi = tc.exp(lnψj_mn - lnψk_m[:, None])  # (Nmc, N)
+            H_cross = Ediag_m * r_m + hx * r_mi.sum(dim=1) # (Nmc,)
+            return r_m + coeff * H_cross
+
+        coeff_prev = None
+        if a_prev is not None:
+            a_prev = tc.as_tensor(a_prev, dtype=tc.complex128, device=device)
+            coeff_prev = (-1j * Δt) * a_prev
+        coeff_next = None
+        if a_next is not None:
+            a_next = tc.as_tensor(a_next, dtype=tc.complex128, device=device)
+            coeff_next = (+1j * Δt) * tc.conj(a_next)
+
+        U_prev = build(ψkm1, coeff_prev)   # <ψ_k | T_{a_prev} | ψ_{k-1}>
+        U_next = build(ψkp1, coeff_next)   # <ψ_k | T_{a_next}^\dagger | ψ_{k+1}>
+        return U_prev, U_next
     
     @tc.no_grad()
     def Uloc_pair_taylor(self, Sk:tc.Tensor, ψk:RBM, ψkm1:RBM, ψkp1:RBM) -> tuple[tc.Tensor, tc.Tensor]:
