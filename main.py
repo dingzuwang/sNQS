@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-09 15:18:02
+# @Last Modified time: 2026-03-17 09:28:14
 import numpy as np
 import torch as tc
 from model import TIM
@@ -15,9 +15,9 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 
 
 def main() -> None:
-    tI = 0.1  # time interval
+    tI = 0.3  # time interval
     tW = 2.0  # time window
-    dt = 0.01  # time step
+    dt = 0.1  # time step
     ## get ground state
     print("-"*20)
     print("Getting initial state...")
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     Lx, Ly = 10, 1
     N = Lx * Ly  # number of spins
     α = 3
-    Q = 3
+    Q = 10
     ## parameters for training
     steps = 400
     lr = 1.e-3

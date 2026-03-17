@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2026-03-06 21:45:50
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-09 13:07:46
+# @Last Modified time: 2026-03-16 22:36:58
 import pytest
 import numpy as np
 import torch as tc
@@ -33,9 +33,13 @@ def test_get_LPE_coeffs() -> None:
     assert np.allclose(np.sum(a_ms), 1.0)
 
 
-a_ms = get_LPE_coeffs(order=3)
-t_nodes, a_links, phy_idx = get_LPE_time_grid(0., 0.2, dt=0.1, a_ms=a_ms)
-print(f"t_nodes = {t_nodes}")
-print(f"a_links = {a_links}")
-print(f"phy_idx = {phy_idx}")
+order = [1, 2, 3, 4]
+for o in order:
+    print(f"order = {o}")
+    a_ms = get_LPE_coeffs(order=o)
+    t_nodes, a_links, phy_idx = get_LPE_time_grid(0., 0.2, dt=0.1, a_ms=a_ms)
+    print(f"t_nodes = {t_nodes.numpy()}")
+    print(f"a_links = {a_links.numpy()}")
+    print('-----------------------------')
+# print(f"phy_idx = {phy_idx}")
 
