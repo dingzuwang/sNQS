@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-17 09:28:14
+# @Last Modified time: 2026-03-23 20:09:24
 import numpy as np
 import torch as tc
 from model import TIM
@@ -17,7 +17,8 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 def main() -> None:
     tI = 0.3  # time interval
     tW = 2.0  # time window
-    dt = 0.1  # time step
+    dt = 0.05 # time step
+    order = 4 # order of LPE scheme
     ## get ground state
     print("-"*20)
     print("Getting initial state...")
@@ -36,7 +37,7 @@ def main() -> None:
     t0, tK = 0., tI
     
     ### LPE time points
-    a_ms = get_LPE_coeffs(order=2)
+    a_ms = get_LPE_coeffs(order=order)
     t_nodes, a_links, phy_idx = get_LPE_time_grid(t0, tK, dt=dt, a_ms=a_ms, device=device)
     g_qt = get_g_qt(t_nodes, Q, device, basis_type='simple')
     snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, dt, model, scheme='lpe', a_links=a_links, phy_idx=phy_idx)
@@ -49,34 +50,43 @@ def main() -> None:
     θ_jq, Ss, losses, ψfini = snqs.train(ψini, Sini, batch, steps=steps, lr=lr, log_interval=steps//10)
     # measure 
     E, Sx, Sz = snqs.expectation_value(Ss, batch=20*batch)
-    
-    # if snqs.scheme == "lpe":
-    #     idx = snqs.phy_idx
-    #     t_plot = t_nodes.detach().cpu().real.numpy()[idx]
-    #     Sx_plot = np.array(Sx)[idx] / N
-    #     Sz_plot = np.array(Sz)[idx] / N
-    # else:
     t_plot = t_nodes.detach().cpu().real.numpy()
+    E_plot = np.array(E) / N
     Sx_plot = np.array(Sx) / N
     Sz_plot = np.array(Sz) / N
-
+    
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(9, 3))
-    ax = fig.add_subplot(1, 2, 1)
+    fig = plt.figure(figsize=(14, 1.8))
+    ax = fig.add_subplot(1, 4, 1)
     ax.plot(t_plot, Sx_plot, '.-', label='sNQS_rbm')
     ax.plot(ts_exact, Sx_exact, '.', label='ED')
     ax.set_xlim(0, tW)
     ax.set_xlabel('Time')
     ax.set_ylabel(r'$\langle \sigma_x \rangle$')
     ax.legend()
-    ax = fig.add_subplot(1, 2, 2)
+    ax = fig.add_subplot(1, 4, 2)
     ax.plot(t_plot, Sz_plot, '.-', label='sNQS_rbm')
     ax.plot(ts_exact, Sz_exact, '.', label='ED')
     ax.set_xlim(0, tW)
     ax.set_xlabel('Time')
     ax.set_ylabel(r'$\langle \sigma_z \rangle$')
     ax.legend()
-    plt.savefig('results.png', dpi=300)
+    ax = fig.add_subplot(1, 4, 3)
+    ax.plot(t_plot, E_plot, '.-', label='sNQS_rbm')
+    ax.set_xlim(0, tW)
+    ax.set_ylim(min(E_plot), -0.2)
+    ax.axhline(y=-0.3, color='k', linestyle='--', label='Exact')
+    ax.set_xlabel('Time')
+    ax.set_ylabel(r'Energy per site')
+    ax.legend()
+    ax = fig.add_subplot(1, 4, 4)
+    ax.plot(losses, '.-')
+    ax.set_xlim(0, steps)
+    ax.set_ylim(1.e-4, max(losses)*1.1)
+    ax.set_xlabel('Training step')
+    ax.set_ylabel('Loss')
+    ax.set_yscale("log")
+    plt.savefig('results.png', dpi=300, bbox_inches='tight')
 
 
 if __name__ == "__main__":
@@ -94,9 +104,9 @@ if __name__ == "__main__":
     Lx, Ly = 10, 1
     N = Lx * Ly  # number of spins
     α = 3
-    Q = 10
+    Q = 8
     ## parameters for training
-    steps = 400
+    steps = 200
     lr = 1.e-3
     print("Parameters:")
     print(f"Lx={Lx}, Ly={Ly}, N={N}, α={α}, Q={Q}, M={M}, batch={batch}, steps={steps}")
