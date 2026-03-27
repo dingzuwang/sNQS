@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-23 20:03:25
+# @Last Modified time: 2026-03-27 14:11:45
 import quante
 import numpy as np
 import torch as tc
@@ -136,8 +136,6 @@ class sNQS_rbm:
                 # grad += tc.outer(g_qt[:, k], G_next)
                 grad += G_next.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_next
-            print(C_prev, C_next)
-        print("----------------------------")
         loss = np.abs(1. - loss)
         return grad, loss
     

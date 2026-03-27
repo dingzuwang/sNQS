@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-23 20:09:24
+# @Last Modified time: 2026-03-27 14:22:31
 import numpy as np
 import torch as tc
 from model import TIM
@@ -15,15 +15,15 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 
 
 def main() -> None:
-    tI = 0.3  # time interval
+    tI = 0.2  # time interval
     tW = 2.0  # time window
-    dt = 0.05 # time step
-    order = 4 # order of LPE scheme
+    dt = 0.01 # time step
+    order = 2 # order of LPE scheme
     ## get ground state
     print("-"*20)
     print("Getting initial state...")
     θ_rand = random_θ(N=N, α=α, device=device)
-    S_rand = random_samples(M, N, device)
+    S_rand = random_samples(M, N, device=device)
     vmc = VMC(θ_rand, Lx, Ly, α, model=TIM(0., -1., 0.))
     ψini, Sini = vmc.train(S_rand, batch, steps=100, lr=1.e-2, log_interval=100)
     ### random 
@@ -38,7 +38,10 @@ def main() -> None:
     
     ### LPE time points
     a_ms = get_LPE_coeffs(order=order)
-    t_nodes, a_links, phy_idx = get_LPE_time_grid(t0, tK, dt=dt, a_ms=a_ms, device=device)
+    t_nodes, a_links, phy_idx = get_LPE_time_grid(
+        t0, tK, dt=dt, a_ms=a_ms, device=device, node_type="real",
+    )
+    print(f"t_nodes: {t_nodes}")
     g_qt = get_g_qt(t_nodes, Q, device, basis_type='simple')
     snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, dt, model, scheme='lpe', a_links=a_links, phy_idx=phy_idx)
     
@@ -106,7 +109,7 @@ if __name__ == "__main__":
     α = 3
     Q = 8
     ## parameters for training
-    steps = 200
+    steps = 400
     lr = 1.e-3
     print("Parameters:")
     print(f"Lx={Lx}, Ly={Ly}, N={N}, α={α}, Q={Q}, M={M}, batch={batch}, steps={steps}")

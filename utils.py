@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-09 17:28:58
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-09 13:34:13
+# @Last Modified time: 2026-03-27 14:05:59
 import math
 import numpy as np
 import torch as tc
@@ -55,8 +55,17 @@ def get_LPE_coeffs(order: int) -> np.ndarray:
     return a_ms
 
 
-def get_LPE_time_grid(t0:float, tK:float, dt:float, a_ms:tc.Tensor, 
-                      *, device="cpu", dtype=tc.complex128) -> tuple[tc.Tensor, tc.Tensor, list[int]]:
+def get_LPE_time_grid(
+    t0:float,
+    tK:float,
+    dt:float,
+    a_ms:tc.Tensor,
+    *,
+    device="cpu",
+    dtype=tc.complex128,
+    node_type:str="real",
+    return_coeff_nodes:bool=False,
+) -> tuple[tc.Tensor, tc.Tensor, list[int]] | tuple[tc.Tensor, tc.Tensor, list[int], tc.Tensor]:
     ### LPE coefficients
     a_ms = tc.as_tensor(a_ms, dtype=dtype, device=device).reshape(-1)
     ### LPE order
@@ -76,8 +85,10 @@ def get_LPE_time_grid(t0:float, tK:float, dt:float, a_ms:tc.Tensor,
     
     t0_c = tc.tensor(t0, dtype=dtype, device=device)
     dt_c = tc.tensor(dt, dtype=dtype, device=device)
+    s_c = tc.tensor(float(s), dtype=dtype, device=device)
 
-    t_nodes = [t0_c]  ## time nodes including physical and intermediate time points
+    coeff_t_nodes = [t0_c]  # original LPE coefficient-based (possibly complex) nodes
+    real_t_nodes = [t0_c]   # uniform real nodes within each physical interval
     a_links = []  ## LPE coefficients linking intermediate time points
     phy_idx = [0]  ## indices of physical time points
     
@@ -85,17 +96,27 @@ def get_LPE_time_grid(t0:float, tK:float, dt:float, a_ms:tc.Tensor,
     for n in range(Nt_phys):
         t_base = t0_c + n * dt_c
         for m in range(1, s + 1):
-            t_nodes.append(t_base + c_seq[m] * dt_c)
+            coeff_t_nodes.append(t_base + c_seq[m] * dt_c)
+            real_t_nodes.append(t_base + tc.tensor(float(m), dtype=dtype, device=device) * dt_c / s_c)
             a_links.append(a_ms[m - 1])
         current_idx += s
         phy_idx.append(current_idx)
 
-    t_nodes = tc.stack(t_nodes)   # (M,)
+    coeff_t_nodes = tc.stack(coeff_t_nodes)  # (M,)
+    real_t_nodes = tc.stack(real_t_nodes)    # (M,)
     a_links = tc.stack(a_links)   # (M-1,)
+    if node_type == "real":
+        t_nodes = real_t_nodes
+    elif node_type == "coeff":
+        t_nodes = coeff_t_nodes
+    else:
+        raise ValueError("t_node_type must be either 'real' or 'coeff'.")
+
+    if return_coeff_nodes:
+        return t_nodes, a_links, phy_idx, coeff_t_nodes
     return t_nodes, a_links, phy_idx
 
- 
- 
+
 def time_function(Q:int, t0:float, tK:float, Δt:float, tW:float, *, device) -> tc.Tensor:
     N_times = int(round((tK - t0) / Δt)) + 1
     ts = t0 + Δt * tc.arange(N_times, device=device, dtype=tc.float64)
@@ -105,8 +126,6 @@ def time_function(Q:int, t0:float, tK:float, Δt:float, tW:float, *, device) -> 
     q = tc.arange(Q, device=device, dtype=tc.float64)
     g_qt = tc.cos(q[:, None] * θ[None, :])
     return ts, g_qt.to(tc.complex128)
-
-
 
 
 def Ilocal(bar:RBM, ket:RBM, s_mn:tc.Tensor) -> tc.Tensor:
@@ -119,19 +138,7 @@ def Hlocal(bar:RBM, ket:RBM, s_mn:tc.Tensor, model:dict):
     Hz = hz * s_mn.sum(dim=1)
     Hzz = J * (s_mn[:, bonds[:,0]] * s_mn[:, bonds[:,1]]).sum(dim=1)
     Eloc_diag = (Hz + Hzz) * ...
-    
-    
+
+
 def H2local(bar:RBM, ket:RBM, s_mn:tc.Tensor, model:dict):
     J, hx, hz = model["J"], model["hx"], model["hz"]
-
-
-
-
-
-
-
-
-
-
-
-
