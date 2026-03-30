@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-27 14:11:45
+# @Last Modified time: 2026-03-30 21:33:47
 import quante
 import numpy as np
 import torch as tc
@@ -334,11 +334,11 @@ class sNQS_rbm:
             sign = +1.0 if dagger else -1.0
             first = (sign * 1j * Δt) * (Ediag_m * r_m + hx * r_mi.sum(dim=1))
             # 2nd order: -1/2 Δt^2 H^2
-            part_DD = (Ediag_m**2) * r_m
-            part_DX_XD = hx * ((Ediag_m[:, None] + Ediag_mi) * r_mi).sum(dim=1)
-            part_XX = hx**2 * (N*r_m + 2*_r_ij(Sk, ψj))
-            second = (-0.5 * Δt**2) * (part_DD + part_DX_XD + part_XX)
-            return r_m + first + second
+            # part_DD = (Ediag_m**2) * r_m
+            # part_DX_XD = hx * ((Ediag_m[:, None] + Ediag_mi) * r_mi).sum(dim=1)
+            # part_XX = hx**2 * (N*r_m + 2*_r_ij(Sk, ψj))
+            # second = (-0.5 * Δt**2) * (part_DD + part_DX_XD + part_XX)
+            return r_m + first #+ second
         
         U_prev = build(ψkm1, dagger=False)  # <ψ_k| U |ψ_{k-1}>
         U_next = build(ψkp1, dagger=True)  # <ψ_k| U† |ψ_{k+1}>

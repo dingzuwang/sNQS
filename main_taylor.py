@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-27 14:22:31
+# @Last Modified time: 2026-03-30 21:34:09
 import numpy as np
 import torch as tc
 from model import TIM
@@ -11,14 +11,14 @@ from vmc import *
 from snqs import *
 from utils import *
 from sampler import Metropolis, random_samples
-device = "cuda" if tc.cuda.is_available() else "cpu"
+device = "cuda:1" if tc.cuda.is_available() else "cpu"
 
 
 def main() -> None:
-    tI = 0.2  # time interval
+    tI = 0.1  # time interval
     tW = 2.0  # time window
-    dt = 0.01 # time step
-    order = 2 # order of LPE scheme
+    dt = 0.0001 # time step
+    order = 1 # order of LPE scheme
     ## get ground state
     print("-"*20)
     print("Getting initial state...")
@@ -37,19 +37,21 @@ def main() -> None:
     t0, tK = 0., tI
     
     ### LPE time points
-    a_ms = get_LPE_coeffs(order=order)
-    t_nodes, a_links, phy_idx = get_LPE_time_grid(
-        t0, tK, dt=dt, a_ms=a_ms, device=device, node_type="real",
-    )
-    print(f"t_nodes: {t_nodes}")
-    g_qt = get_g_qt(t_nodes, Q, device, basis_type='simple')
-    snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, dt, model, scheme='lpe', a_links=a_links, phy_idx=phy_idx)
+    # a_ms = get_LPE_coeffs(order=order)
+    # t_nodes, a_links, phy_idx = get_LPE_time_grid(
+    #     t0, tK, dt=dt, a_ms=a_ms, device=device, node_type="coeff",
+    # )
+    # print(f"t_nodes: {t_nodes}")
+    # g_qt = get_g_qt(t_nodes, Q, device, basis_type='simple')
+    # snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, dt, model, scheme='lpe', a_links=a_links, phy_idx=phy_idx)
+    # print(f"a_ms: {a_ms}")
     
     ### Taylor time points
-    # t_nodes = tc.arange(t0, tK + 0.5*dt, dt, device=device, dtype=tc.float64)
-    # g_qt = get_g_qt(t_nodes, Q, device, basis_type='simple')
-    # snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, dt, model, scheme='taylor')
+    t_nodes = tc.arange(t0, tK + 0.5*dt, dt, device=device, dtype=tc.float64)
+    g_qt = get_g_qt(t_nodes, Q, device, basis_type='simple')
+    snqs = sNQS_rbm(θ_jq, g_qt, Lx, Ly, α, dt, model, scheme='taylor')
     
+    ### train
     θ_jq, Ss, losses, ψfini = snqs.train(ψini, Sini, batch, steps=steps, lr=lr, log_interval=steps//10)
     # measure 
     E, Sx, Sz = snqs.expectation_value(Ss, batch=20*batch)
@@ -89,7 +91,7 @@ def main() -> None:
     ax.set_xlabel('Training step')
     ax.set_ylabel('Loss')
     ax.set_yscale("log")
-    plt.savefig('results.png', dpi=300, bbox_inches='tight')
+    plt.savefig('results_taylor.png', dpi=300, bbox_inches='tight')
 
 
 if __name__ == "__main__":
