@@ -2,13 +2,13 @@
 # @Author: dzwang
 # @Date:   2025-09-06 18:53:53
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-07 21:51:34
+# @Last Modified time: 2026-04-07 10:48:19
 import torch as tc
 
 
 __all__ = ["RBM", "random_θ", "random_θ_jq"]
- 
- 
+
+
 class RBM():
     def __init__(self, θ:tc.Tensor, N:int, α:int) -> None:
         assert θ.ndim == 1 and θ.numel() == N + α*N + N*α*N
@@ -39,6 +39,10 @@ class RBM():
         part1 = s_mn @ a_n
         part2 = tc.sum(tc.log(2*tc.cosh(b_αn + s_mn @ W_nαn)), dim=1)
         return (part1 + part2).reshape(*m)
+    
+    def probability(self, s_mn:tc.Tensor) -> tc.Tensor:
+        ## todo with exactly probability
+        ...
     
     def d_lnPsi(self, s_mn:tc.Tensor) -> tc.Tensor:
         b_αn, W_nαn = self.b_αn, self.W_nαn
