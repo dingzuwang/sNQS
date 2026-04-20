@@ -2,10 +2,11 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-20 15:02:02
+# @Last Modified time: 2026-04-20 21:17:29
 import quante
 import numpy as np
 import torch as tc
+from exact import ExactSpinBasis, build_exact_spin_basis, diagonal_tim_energy, rbm_state_vector, tim_exact_observables
 from rbm import RBM
 from model import TIM
 from sampler import Metropolis
@@ -37,6 +38,9 @@ class sNQS_rbm:
     
     def __init__(self, θ_jq: tc.Tensor, g_qt: tc.Tensor, Lx: int, Ly: int, α: int, Δt: float, model: TIM,
         *,
+        backend: str = "mc",
+        max_exact_spins: int = 16,
+        allow_large_exact: bool = False,
         scheme: str = "taylor",
         a_links: tc.Tensor | None = None,
         phy_idx: list[int] | None = None) -> None:
@@ -53,14 +57,59 @@ class sNQS_rbm:
         self.K = g_qt.shape[1]
         self.device = θ_jq.device
         
+        if backend not in {"mc", "exact"}:
+            raise ValueError("backend must be either 'mc' or 'exact'.")
+        if max_exact_spins < 1:
+            raise ValueError("max_exact_spins must be a positive integer.")
+        self.backend = backend
+        self.max_exact_spins = max_exact_spins
+        self.allow_large_exact = allow_large_exact
         self.scheme = scheme
         self.a_links = a_links
         self.phy_idx = phy_idx
+        self._exact_basis = None
+        self._exact_Ediag = None
     
     @property
     def ψs(self) -> list[RBM]:  # 's' labels time
         θ_jt = self.θ_jq @ self.g_qt
         return [RBM(θ_jt[:, k].contiguous(), self.N, self.α) for k in range(self.K)]
+
+    @property
+    def bonds(self) -> tc.Tensor:
+        return self.model.bonds(self.Lx, self.Ly).to(device=self.device, dtype=tc.long)
+
+    def _validate_exact_backend_size(self) -> None:
+        if self.backend != "exact" or self.allow_large_exact:
+            return
+        if self.N <= self.max_exact_spins:
+            return
+        num_states = 1 << self.N
+        raise ValueError(
+            "Exact backend is intended for small systems; "
+            f"got N={self.N} ({num_states} states), "
+            f"which exceeds max_exact_spins={self.max_exact_spins}. "
+            "Set allow_large_exact=True to override this safety check."
+        )
+
+    @property
+    def exact_basis(self) -> ExactSpinBasis:
+        self._validate_exact_backend_size()
+        if self._exact_basis is None:
+            self._exact_basis = build_exact_spin_basis(self.N, device=self.device, dtype=tc.complex128)
+        return self._exact_basis
+
+    @property
+    def exact_Ediag(self) -> tc.Tensor:
+        self._validate_exact_backend_size()
+        if self._exact_Ediag is None:
+            self._exact_Ediag = diagonal_tim_energy(
+                self.exact_basis.states,
+                self.bonds,
+                J=self.model.J,
+                hz=self.model.hz,
+            )
+        return self._exact_Ediag
     
     def train(self, ψini:RBM, Sini:tc.Tensor, batch:int, 
               *,
@@ -344,12 +393,15 @@ class sNQS_rbm:
         U_next = build(ψkp1, dagger=True)  # <ψ_k| U† |ψ_{k+1}>
         return U_prev, U_next
     
-    @tc.no_grad()       
-    def expectation_value(self, Ss:list[tc.Tensor], batch:int) -> tuple[list, list, list]:
+    @tc.no_grad()
+    def expectation_value(self, Ss:list[tc.Tensor] | None, batch:int) -> tuple[list, list, list]:
+        if self.backend == "exact":
+            return self.expectation_value_exact()
+
         K = self.K
         ψs = self.ψs
         assert len(Ss) == len(ψs) == K
-        bonds = self.model.bonds(self.Lx, self.Ly).to(device=self.device, dtype=tc.long)
+        bonds = self.bonds
         
         Nmc = Ss[0].shape[0] * batch
         E_k, Sx_k, Sz_k = [], [], []
@@ -373,6 +425,31 @@ class sNQS_rbm:
             Sz_k.append(float((sum_Sz/Nmc).real))
             
             Ss[k] = Sk
+        return E_k, Sx_k, Sz_k
+
+    @tc.no_grad()
+    def expectation_value_exact(self) -> tuple[list, list, list]:
+        self._validate_exact_backend_size()
+        ψs = self.ψs
+        basis = self.exact_basis
+        bonds = self.bonds
+        Ediag_s = self.exact_Ediag
+
+        E_k, Sx_k, Sz_k = [], [], []
+        for ψk in ψs:
+            psi_s = rbm_state_vector(ψk, basis)
+            E, Sx, Sz = tim_exact_observables(
+                psi_s,
+                basis,
+                bonds,
+                J=self.model.J,
+                hx=self.model.hx,
+                hz=self.model.hz,
+                Ediag_s=Ediag_s,
+            )
+            E_k.append(float(E.real))
+            Sx_k.append(float(Sx.real))
+            Sz_k.append(float(Sz.real))
         return E_k, Sx_k, Sz_k
     
     @tc.no_grad()
