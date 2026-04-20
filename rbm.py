@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 18:53:53
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-07 10:48:19
+# @Last Modified time: 2026-04-20 15:57:43
 import torch as tc
 
 
@@ -41,8 +41,12 @@ class RBM():
         return (part1 + part2).reshape(*m)
     
     def probability(self, s_mn:tc.Tensor) -> tc.Tensor:
-        ## todo with exactly probability
-        ...
+        logw = 2.0 * self.lnPsi(s_mn).real.to(dtype=tc.float64)
+        flat_logw = logw.reshape(-1)
+        if flat_logw.numel() == 0:
+            raise ValueError("Input states must be non-empty.")
+        log_norm = tc.logsumexp(flat_logw, dim=0)
+        return tc.exp(flat_logw - log_norm).reshape(logw.shape)
     
     def d_lnPsi(self, s_mn:tc.Tensor) -> tc.Tensor:
         b_αn, W_nαn = self.b_αn, self.W_nαn

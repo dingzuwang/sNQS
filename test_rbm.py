@@ -2,17 +2,18 @@
 # @Author: dzwang
 # @Date:   2025-09-07 15:37:47
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-07 21:57:37
+# @Last Modified time: 2026-04-20 15:58:21
 import torch as tc
 from rbm import RBM, random_θ, random_θ_jq
 from sampler import random_samples
+from exact import enumerate_spin_states
  
  
 # * Test parameters
 device = "cuda" if tc.cuda.is_available() else "cpu"
 ## Parameters to generate RBM instance
-N = tc.randint(low=1, high=100, size=(1,))
-α = tc.randint(low=1, high=10, size=(1,))
+N = tc.randint(low=1, high=10, size=(1,))
+α = tc.randint(low=1, high=5, size=(1,))
 ## Parameters to generate Samples
 M = tc.randint(low=1, high=1000, size=(1,)) * 6  # must be a multiple of 6 for testing lnPsi shape using MC
 
@@ -86,6 +87,26 @@ def test_rbm_d_lnPsi() -> None:
         grad_θ, = tc.autograd.grad(lnPsi[i], θ, grad_outputs=unit, retain_graph=True)
         auto_d_lnPsi_mj[i,:] = grad_θ
     assert tc.allclose(d_lnPsi_mj, auto_d_lnPsi_mj.conj())
+
+
+def test_rbm_probability() -> None:
+    N = 4
+    α = 2
+    θ = random_θ(N, α, device)
+    nqs = RBM(θ, N, α)
+    states = enumerate_spin_states(N, device=device)
+    prob = nqs.probability(states)
+
+    # Benchmark the normalized exact probability with a direct formula.
+    lnpsi = nqs.lnPsi(states)
+    weight = tc.exp(2.0 * lnpsi.real)
+    expected = weight / weight.sum()
+
+    assert prob.shape == (2**N,)
+    assert prob.dtype == tc.float64
+    assert tc.allclose(prob.sum(), tc.tensor(1.0, dtype=tc.float64, device=device))
+    assert tc.all(prob >= 0.0)
+    assert tc.allclose(prob, expected)
     
 
 

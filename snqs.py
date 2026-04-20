@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-30 21:33:47
+# @Last Modified time: 2026-04-20 15:02:02
 import quante
 import numpy as np
 import torch as tc
@@ -276,7 +276,7 @@ class sNQS_rbm:
         if a_next is not None:
             a_next = tc.as_tensor(a_next, dtype=tc.complex128, device=device)
             coeff_next = (+1j * Δt) * tc.conj(a_next)
-
+        
         U_prev = build(ψkm1, coeff_prev)   # <ψ_k | T_{a_prev} | ψ_{k-1}>
         U_next = build(ψkp1, coeff_next)   # <ψ_k | T_{a_next}^\dagger | ψ_{k+1}>
         return U_prev, U_next
@@ -334,11 +334,11 @@ class sNQS_rbm:
             sign = +1.0 if dagger else -1.0
             first = (sign * 1j * Δt) * (Ediag_m * r_m + hx * r_mi.sum(dim=1))
             # 2nd order: -1/2 Δt^2 H^2
-            # part_DD = (Ediag_m**2) * r_m
-            # part_DX_XD = hx * ((Ediag_m[:, None] + Ediag_mi) * r_mi).sum(dim=1)
-            # part_XX = hx**2 * (N*r_m + 2*_r_ij(Sk, ψj))
-            # second = (-0.5 * Δt**2) * (part_DD + part_DX_XD + part_XX)
-            return r_m + first #+ second
+            part_DD = (Ediag_m**2) * r_m
+            part_DX_XD = hx * ((Ediag_m[:, None] + Ediag_mi) * r_mi).sum(dim=1)
+            part_XX = hx**2 * (N*r_m + 2*_r_ij(Sk, ψj))
+            second = (-0.5 * Δt**2) * (part_DD + part_DX_XD + part_XX)
+            return r_m + first + second
         
         U_prev = build(ψkm1, dagger=False)  # <ψ_k| U |ψ_{k-1}>
         U_next = build(ψkp1, dagger=True)  # <ψ_k| U† |ψ_{k+1}>
