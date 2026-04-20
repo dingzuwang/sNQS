@@ -2,11 +2,18 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-20 21:17:29
+# @Last Modified time: 2026-04-20 22:56:59
 import quante
 import numpy as np
 import torch as tc
-from exact import ExactSpinBasis, build_exact_spin_basis, diagonal_tim_energy, rbm_state_vector, tim_exact_observables
+from exact import (
+    ExactSpinBasis,
+    build_exact_spin_basis,
+    diagonal_tim_energy,
+    rbm_state_vector,
+    tim_exact_observables,
+    tim_hamiltonian_action,
+)
 from rbm import RBM
 from model import TIM
 from sampler import Metropolis
@@ -111,14 +118,19 @@ class sNQS_rbm:
             )
         return self._exact_Ediag
     
-    def train(self, ψini:RBM, Sini:tc.Tensor, batch:int, 
+    def train(self, ψini:RBM, Sini:tc.Tensor | None, batch:int, 
               *,
               steps:int, lr:float, ema_alpha:float=0.95, log_interval:int
-              ) -> tuple[tc.Tensor, list[tc.Tensor], list[float], RBM]:
-        # initialized MC-samples for each network ψk
+              ) -> tuple[tc.Tensor, list[tc.Tensor] | None, list[float], RBM]:
         ψs = self.ψs
-        Ss = [Sini.clone() for _ in range(self.K)]
-        Ss = update_Ss(ψs, Ss, sweep=50*self.N)
+        if self.backend == "exact":
+            self._validate_exact_backend_size()
+            Ss = None
+        else:
+            if Sini is None:
+                raise ValueError("Sini must be provided when backend='mc'.")
+            Ss = [Sini.clone() for _ in range(self.K)]
+            Ss = update_Ss(ψs, Ss, sweep=50*self.N)
         
         # make sure 'θ_jq' is a leaf param and define the optimizer
         if not isinstance(self.θ_jq, tc.nn.Parameter):
@@ -133,7 +145,8 @@ class sNQS_rbm:
         for epoch in range(1, steps+1):
             with tc.no_grad():
                 ψs = self.ψs
-                Ss = update_Ss(ψs, Ss, sweep=self.N)
+                if self.backend == "mc":
+                    Ss = update_Ss(ψs, Ss, sweep=self.N)
                 grad, loss = self.grad_jq(ψini, ψs, Ss, batch)  # grad: complex (Np, Q); loss: float
                 if grad.dtype != param.dtype or grad.device != param.device:
                     grad = grad.to(dtype=param.dtype, device=param.device)
@@ -160,7 +173,10 @@ class sNQS_rbm:
         return self.θ_jq.detach().clone(), Ss, np.array(losses), ψfinal
     
     @tc.no_grad()
-    def grad_jq(self, ψini:RBM, ψs:list[RBM], Ss:list[tc.Tensor], batch:int) -> tuple[tc.Tensor, float]:
+    def grad_jq(self, ψini:RBM, ψs:list[RBM], Ss:list[tc.Tensor] | None, batch:int) -> tuple[tc.Tensor, float]:
+        if self.backend == "exact":
+            return self.grad_jq_exact(ψini, ψs)
+
         g_qt = self.g_qt
         grad = tc.zeros_like(self.θ_jq, device=self.device)   # (Np, Q)
         loss = 1.
@@ -392,6 +408,176 @@ class sNQS_rbm:
         U_prev = build(ψkm1, dagger=False)  # <ψ_k| U |ψ_{k-1}>
         U_next = build(ψkp1, dagger=True)  # <ψ_k| U† |ψ_{k+1}>
         return U_prev, U_next
+
+    @tc.no_grad()
+    def grad_jq_exact(self, ψini: RBM, ψs: list[RBM]) -> tuple[tc.Tensor, float]:
+        self._validate_exact_backend_size()
+        grad = tc.zeros_like(self.θ_jq, device=self.device)
+        loss = 1.0 + 0.0j
+
+        psiinit_s = rbm_state_vector(ψini, self.exact_basis)
+        psi_vecs = [rbm_state_vector(ψk, self.exact_basis) for ψk in ψs]
+
+        G0, C0 = self.dC_init_exact(ψs[0], psi_vecs[0], ψini, psiinit_s)
+        grad += G0.reshape(-1, 1) @ self.g_qt[:, 0].reshape(1, -1)
+        loss *= C0
+
+        for k in range(self.K):
+            psi_km1_s = psi_vecs[k - 1] if k > 0 else None
+            psi_kp1_s = psi_vecs[k + 1] if k < self.K - 1 else None
+            a_prev = self.a_links[k - 1] if (self.scheme == "lpe" and k > 0) else None
+            a_next = self.a_links[k] if (self.scheme == "lpe" and k < self.K - 1) else None
+            G_prev, G_next, C_prev, C_next = self.dC_pair_exact(
+                ψs[k],
+                psi_vecs[k],
+                psi_km1_s,
+                psi_kp1_s,
+                a_prev=a_prev,
+                a_next=a_next,
+            )
+            if G_prev is not None:
+                grad += G_prev.reshape(-1, 1) @ self.g_qt[:, k].reshape(1, -1)
+                loss *= C_prev
+            if G_next is not None:
+                grad += G_next.reshape(-1, 1) @ self.g_qt[:, k].reshape(1, -1)
+                loss *= C_next
+
+        return grad, float(np.abs(1.0 - loss))
+    
+    @tc.no_grad()
+    def dC_init_exact(self, ψ0: RBM, psi0_s: tc.Tensor, ψinit: RBM, psiinit_s: tc.Tensor) -> tuple[tc.Tensor, complex]:
+        prob0_s = psi0_s.abs().square()
+        prob0_s = prob0_s / prob0_s.sum()
+        r0_s = self._safe_local_ratio(psiinit_s, psi0_s)
+        mean_O, mean_Or0, mean_r0 = self._exact_weighted_stats(ψ0, prob0_s, r0_s)
+        overlap = (psiinit_s.conj() * psi0_s).sum()
+        norm_init = psiinit_s.abs().square().sum()
+        C0 = (overlap / norm_init) * mean_r0
+        G0 = (mean_Or0 - mean_O * mean_r0) / mean_r0
+        return G0, C0.item()
+
+    def _exact_weighted_stats(self, ψk: RBM, prob_s: tc.Tensor, value_s: tc.Tensor) -> tuple[tc.Tensor, tc.Tensor, tc.Tensor]:
+        chunk_size = self._exact_chunk_size()
+        mean_O = tc.zeros(self.Np, dtype=tc.complex128, device=self.device)
+        mean_OV = tc.zeros(self.Np, dtype=tc.complex128, device=self.device)
+        mean_value = (prob_s * value_s).sum()
+
+        for start in range(0, self.exact_basis.num_states, chunk_size):
+            stop = min(start + chunk_size, self.exact_basis.num_states)
+            states_chunk = self.exact_basis.states[start:stop]
+            O_chunk = ψk.d_lnPsi(states_chunk).conj()
+            prob_chunk = prob_s[start:stop]
+            value_chunk = value_s[start:stop]
+            mean_O += (prob_chunk[:, None] * O_chunk).sum(dim=0)
+            mean_OV += ((prob_chunk * value_chunk)[:, None] * O_chunk).sum(dim=0)
+        return mean_O, mean_OV, mean_value
+    
+    def _exact_chunk_size(self) -> int:
+        return min(self.exact_basis.num_states, 4096)
+    
+    @tc.no_grad()
+    def dC_pair_exact(
+        self,
+        ψk: RBM,
+        psi_k_s: tc.Tensor,
+        psi_km1_s: tc.Tensor | None,
+        psi_kp1_s: tc.Tensor | None,
+        *,
+        a_prev=None,
+        a_next=None,
+    ) -> tuple[tc.Tensor | None, tc.Tensor | None, complex | None, complex | None]:
+        probk_s = psi_k_s.abs().square()
+        probk_s = probk_s / probk_s.sum()
+        U_prev, U_next = self.Uloc_pair_exact(
+            psi_k_s,
+            psi_km1_s,
+            psi_kp1_s,
+            a_prev=a_prev,
+            a_next=a_next,
+        )
+
+        def finalize(value_s: tc.Tensor | None) -> tuple[tc.Tensor | None, complex | None]:
+            if value_s is None:
+                return None, None
+            mean_O, mean_OU, mean_value = self._exact_weighted_stats(ψk, probk_s, value_s)
+            G = (mean_OU - mean_O * mean_value) / mean_value
+            return G, mean_value.item()
+
+        G_prev, C_prev = finalize(U_prev)
+        G_next, C_next = finalize(U_next)
+        return G_prev, G_next, C_prev, C_next
+    
+    def Uloc_pair_exact(
+        self,
+        psi_k_s: tc.Tensor,
+        psi_km1_s: tc.Tensor | None,
+        psi_kp1_s: tc.Tensor | None,
+        *,
+        a_prev=None,
+        a_next=None,
+    ) -> tuple[tc.Tensor | None, tc.Tensor | None]:
+        U_prev = None
+        if psi_km1_s is not None:
+            if self.scheme == "taylor":
+                numer_prev = self._exact_taylor_state(psi_km1_s, dagger=False)
+            elif self.scheme == "lpe":
+                coeff_prev = (-1j * self.Δt) * tc.as_tensor(a_prev, dtype=tc.complex128, device=self.device)
+                numer_prev = self._exact_lpe_state(psi_km1_s, coeff_prev)
+            else:
+                raise ValueError("Unsupported scheme.")
+            U_prev = self._safe_local_ratio(numer_prev, psi_k_s)
+
+        U_next = None
+        if psi_kp1_s is not None:
+            if self.scheme == "taylor":
+                numer_next = self._exact_taylor_state(psi_kp1_s, dagger=True)
+            elif self.scheme == "lpe":
+                coeff_next = (+1j * self.Δt) * tc.conj(tc.as_tensor(a_next, dtype=tc.complex128, device=self.device))
+                numer_next = self._exact_lpe_state(psi_kp1_s, coeff_next)
+            else:
+                raise ValueError("Unsupported scheme.")
+            U_next = self._safe_local_ratio(numer_next, psi_k_s)
+        return U_prev, U_next
+    
+    def _exact_taylor_state(self, psi_s: tc.Tensor, *, dagger: bool) -> tc.Tensor:
+        Hpsi_s = tim_hamiltonian_action(
+            psi_s,
+            self.exact_basis,
+            self.bonds,
+            J=self.model.J,
+            hx=self.model.hx,
+            hz=self.model.hz,
+            Ediag_s=self.exact_Ediag,
+        )
+        H2psi_s = tim_hamiltonian_action(
+            Hpsi_s,
+            self.exact_basis,
+            self.bonds,
+            J=self.model.J,
+            hx=self.model.hx,
+            hz=self.model.hz,
+            Ediag_s=self.exact_Ediag,
+        )
+        sign = +1.0 if dagger else -1.0
+        return psi_s + (sign * 1j * self.Δt) * Hpsi_s - 0.5 * (self.Δt ** 2) * H2psi_s
+
+    def _exact_lpe_state(self, psi_s: tc.Tensor, coeff: tc.Tensor) -> tc.Tensor:
+        Hpsi_s = tim_hamiltonian_action(
+            psi_s,
+            self.exact_basis,
+            self.bonds,
+            J=self.model.J,
+            hx=self.model.hx,
+            hz=self.model.hz,
+            Ediag_s=self.exact_Ediag,
+        )
+        return psi_s + coeff * Hpsi_s
+
+    def _safe_local_ratio(self, numerator_s: tc.Tensor, denominator_s: tc.Tensor, cutoff: float = 1e-30) -> tc.Tensor:
+        out = tc.zeros_like(numerator_s)
+        mask = denominator_s.abs() > cutoff
+        out[mask] = numerator_s[mask] / denominator_s[mask]
+        return out
     
     @tc.no_grad()
     def expectation_value(self, Ss:list[tc.Tensor] | None, batch:int) -> tuple[list, list, list]:
