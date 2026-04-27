@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-06 20:12:55
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-20 22:56:59
+# @Last Modified time: 2026-04-27 22:19:55
 import quante
 import numpy as np
 import torch as tc
@@ -137,7 +137,7 @@ class sNQS_rbm:
             self.θ_jq = tc.nn.Parameter(self.θ_jq, requires_grad=True)
         param = self.θ_jq
         assert id(param) == id(self.θ_jq)
-        optimizer = tc.optim.AdamW([param], lr=lr, weight_decay=1e-5, amsgrad=True)
+        optimizer = tc.optim.Adam([param], lr=lr, weight_decay=1e-5, amsgrad=True)
         scheduler = tc.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=300, cooldown=41, factor=0.5, min_lr=1.e-6)
         
         losses = []  # 'es' labels time
