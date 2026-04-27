@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2026-04-21 04:04:09
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-21 04:07:41
+# @Last Modified time: 2026-04-27 22:29:41
 
 import numpy as np
 import torch as tc
@@ -21,7 +21,7 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 def main() -> None:
     scheme = "lpe"
     backend = "exact"
-    t0, tK = 0.0, 0.4
+    t0, tK = 0.0, 0.2
     dt = 0.02
     order = 2
 
@@ -30,8 +30,8 @@ def main() -> None:
     N = Lx * Ly
     α = 3
     Q = 8
-    steps = 500
-    lr = 1.0e-3
+    steps = 2000
+    lr = 1.0e-4
 
     M = 500
     batch = 1
