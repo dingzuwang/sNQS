@@ -120,8 +120,9 @@ class sNQS_rbm:
     
     def train(self, ψini:RBM, Sini:tc.Tensor | None, batch:int, 
               *,
-              steps:int, lr:float, ema_alpha:float=0.95, log_interval:int
-              ) -> tuple[tc.Tensor, list[tc.Tensor] | None, list[float], RBM]:
+              steps:int, lr:float, ema_alpha:float=0.95, log_interval:int,
+              return_time_losses: bool=False,
+              ) -> tuple[tc.Tensor, list[tc.Tensor] | None, np.ndarray, RBM] | tuple[tc.Tensor, list[tc.Tensor] | None, np.ndarray, np.ndarray, RBM]:
         ψs = self.ψs
         if self.backend == "exact":
             self._validate_exact_backend_size()
@@ -140,14 +141,18 @@ class sNQS_rbm:
         optimizer = tc.optim.Adam([param], lr=lr, weight_decay=1e-5, amsgrad=True)
         scheduler = tc.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=300, cooldown=41, factor=0.5, min_lr=1.e-6)
         
-        losses = []  # 'es' labels time
+        losses = []
+        time_losses = [] if return_time_losses else None
         ema = None
         for epoch in range(1, steps+1):
             with tc.no_grad():
                 ψs = self.ψs
                 if self.backend == "mc":
                     Ss = update_Ss(ψs, Ss, sweep=self.N)
-                grad, loss = self.grad_jq(ψini, ψs, Ss, batch)  # grad: complex (Np, Q); loss: float
+                if return_time_losses:
+                    grad, loss, loss_by_time = self.grad_jq(ψini, ψs, Ss, batch, return_time_losses=True)
+                else:
+                    grad, loss = self.grad_jq(ψini, ψs, Ss, batch)  # grad: complex (Np, Q); loss: float
                 if grad.dtype != param.dtype or grad.device != param.device:
                     grad = grad.to(dtype=param.dtype, device=param.device)
                 
@@ -164,27 +169,47 @@ class sNQS_rbm:
             
             # Record
             losses.append(loss)
+            if return_time_losses:
+                time_losses.append(loss_by_time)
             if epoch%log_interval==0 or epoch==1 or epoch==steps:
                 print(f"[{epoch:6d}/{steps}] "
                       f"loss={loss:.6g}, ema={ema:.6g} "
                       f"lr={optimizer.param_groups[0]['lr']:.3g}")
+                if return_time_losses:
+                    print(
+                        "    loss_by_time="
+                        f"{np.array2string(loss_by_time, precision=3, suppress_small=False, max_line_width=140)}"
+                    )
         
         ψfinal = self.ψs[-1]
+        if return_time_losses:
+            return self.θ_jq.detach().clone(), Ss, np.array(losses), np.array(time_losses), ψfinal
         return self.θ_jq.detach().clone(), Ss, np.array(losses), ψfinal
     
     @tc.no_grad()
-    def grad_jq(self, ψini:RBM, ψs:list[RBM], Ss:list[tc.Tensor] | None, batch:int) -> tuple[tc.Tensor, float]:
+    def grad_jq(
+        self,
+        ψini:RBM,
+        ψs:list[RBM],
+        Ss:list[tc.Tensor] | None,
+        batch:int,
+        *,
+        return_time_losses: bool=False,
+    ) -> tuple[tc.Tensor, float] | tuple[tc.Tensor, float, np.ndarray]:
         if self.backend == "exact":
-            return self.grad_jq_exact(ψini, ψs)
+            return self.grad_jq_exact(ψini, ψs, return_time_losses=return_time_losses)
 
         g_qt = self.g_qt
         grad = tc.zeros_like(self.θ_jq, device=self.device)   # (Np, Q)
         loss = 1.
+        time_products = np.ones(self.K, dtype=np.complex128) if return_time_losses else None
         
         ## first term
         G_0, C_0 = self.dC_init(Ss[0], ψs[0], ψini, batch)
         grad += G_0.reshape(-1, 1) @ g_qt[:, 0].reshape(1, -1)
         loss *= C_0
+        if time_products is not None:
+            time_products[0] *= C_0
         
         ## other terms 
         for k in range(self.K):
@@ -197,11 +222,17 @@ class sNQS_rbm:
                 # grad += tc.outer(g_qt[:, k], G_prev)
                 grad += G_prev.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_prev
+                if time_products is not None:
+                    time_products[k] *= C_prev
             if G_next is not None:
                 # grad += tc.outer(g_qt[:, k], G_next)
                 grad += G_next.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_next
+                if time_products is not None:
+                    time_products[k] *= C_next
         loss = np.abs(1. - loss)
+        if time_products is not None:
+            return grad, loss, np.abs(1. - time_products)
         return grad, loss
     
     @tc.no_grad()
@@ -410,10 +441,17 @@ class sNQS_rbm:
         return U_prev, U_next
 
     @tc.no_grad()
-    def grad_jq_exact(self, ψini: RBM, ψs: list[RBM]) -> tuple[tc.Tensor, float]:
+    def grad_jq_exact(
+        self,
+        ψini: RBM,
+        ψs: list[RBM],
+        *,
+        return_time_losses: bool=False,
+    ) -> tuple[tc.Tensor, float] | tuple[tc.Tensor, float, np.ndarray]:
         self._validate_exact_backend_size()
         grad = tc.zeros_like(self.θ_jq, device=self.device)
         loss = 1.0 + 0.0j
+        time_products = np.ones(self.K, dtype=np.complex128) if return_time_losses else None
 
         psiinit_s = rbm_state_vector(ψini, self.exact_basis)
         psi_vecs = [rbm_state_vector(ψk, self.exact_basis) for ψk in ψs]
@@ -421,6 +459,8 @@ class sNQS_rbm:
         G0, C0 = self.dC_init_exact(ψs[0], psi_vecs[0], ψini, psiinit_s)
         grad += G0.reshape(-1, 1) @ self.g_qt[:, 0].reshape(1, -1)
         loss *= C0
+        if time_products is not None:
+            time_products[0] *= C0
 
         for k in range(self.K):
             psi_km1_s = psi_vecs[k - 1] if k > 0 else None
@@ -438,10 +478,16 @@ class sNQS_rbm:
             if G_prev is not None:
                 grad += G_prev.reshape(-1, 1) @ self.g_qt[:, k].reshape(1, -1)
                 loss *= C_prev
+                if time_products is not None:
+                    time_products[k] *= C_prev
             if G_next is not None:
                 grad += G_next.reshape(-1, 1) @ self.g_qt[:, k].reshape(1, -1)
                 loss *= C_next
+                if time_products is not None:
+                    time_products[k] *= C_next
 
+        if time_products is not None:
+            return grad, float(np.abs(1.0 - loss)), np.abs(1.0 - time_products)
         return grad, float(np.abs(1.0 - loss))
     
     @tc.no_grad()
