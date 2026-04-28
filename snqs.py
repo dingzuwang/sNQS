@@ -121,8 +121,14 @@ class sNQS_rbm:
     def train(self, ψini:RBM, Sini:tc.Tensor | None, batch:int, 
               *,
               steps:int, lr:float, ema_alpha:float=0.95, log_interval:int,
+              objective: str="global_product",
               return_time_losses: bool=False,
               ) -> tuple[tc.Tensor, list[tc.Tensor] | None, np.ndarray, RBM] | tuple[tc.Tensor, list[tc.Tensor] | None, np.ndarray, np.ndarray, RBM]:
+        if objective not in {"global_product", "link_fidelity"}:
+            raise ValueError("objective must be either 'global_product' or 'link_fidelity'.")
+        if objective == "link_fidelity" and self.backend != "exact":
+            raise NotImplementedError("objective='link_fidelity' is currently implemented only for backend='exact'.")
+
         ψs = self.ψs
         if self.backend == "exact":
             self._validate_exact_backend_size()
@@ -145,22 +151,28 @@ class sNQS_rbm:
         time_losses = [] if return_time_losses else None
         ema = None
         for epoch in range(1, steps+1):
-            with tc.no_grad():
+            if objective == "link_fidelity":
                 ψs = self.ψs
-                if self.backend == "mc":
-                    Ss = update_Ss(ψs, Ss, sweep=self.N)
-                if return_time_losses:
-                    grad, loss, loss_by_time = self.grad_jq(ψini, ψs, Ss, batch, return_time_losses=True)
-                else:
-                    grad, loss = self.grad_jq(ψini, ψs, Ss, batch)  # grad: complex (Np, Q); loss: float
-                if grad.dtype != param.dtype or grad.device != param.device:
-                    grad = grad.to(dtype=param.dtype, device=param.device)
-                
-                # initialize/overwrite param.grad (no graph)
-                if param.grad is None: 
-                    param.grad = tc.zeros_like(param)
-                param.grad = (-grad).clone()
-            
+                loss_tensor, loss_by_time = self.exact_link_fidelity_loss(ψini, ψs)
+                loss = float(loss_tensor.detach().cpu())
+                loss_tensor.backward()
+            else:
+                with tc.no_grad():
+                    ψs = self.ψs
+                    if self.backend == "mc":
+                        Ss = update_Ss(ψs, Ss, sweep=self.N)
+                    if return_time_losses:
+                        grad, loss, loss_by_time = self.grad_jq(ψini, ψs, Ss, batch, return_time_losses=True)
+                    else:
+                        grad, loss = self.grad_jq(ψini, ψs, Ss, batch)  # grad: complex (Np, Q); loss: float
+                    if grad.dtype != param.dtype or grad.device != param.device:
+                        grad = grad.to(dtype=param.dtype, device=param.device)
+                    
+                    # initialize/overwrite param.grad (no graph)
+                    if param.grad is None: 
+                        param.grad = tc.zeros_like(param)
+                    param.grad = (-grad).clone()
+
             # one optimizer step and scheduler step
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
@@ -176,8 +188,9 @@ class sNQS_rbm:
                       f"loss={loss:.6g}, ema={ema:.6g} "
                       f"lr={optimizer.param_groups[0]['lr']:.3g}")
                 if return_time_losses:
+                    loss_label = "normalized_link_loss_by_time" if objective == "link_fidelity" else "link_loss_by_time"
                     print(
-                        "    loss_by_time="
+                        f"    {loss_label}="
                         f"{np.array2string(loss_by_time, precision=3, suppress_small=False, max_line_width=140)}"
                     )
         
@@ -202,14 +215,14 @@ class sNQS_rbm:
         g_qt = self.g_qt
         grad = tc.zeros_like(self.θ_jq, device=self.device)   # (Np, Q)
         loss = 1.
-        time_products = np.ones(self.K, dtype=np.complex128) if return_time_losses else None
+        C_0 = None
+        C_prev_by_time = [None] * self.K if return_time_losses else None
+        C_next_by_time = [None] * self.K if return_time_losses else None
         
         ## first term
         G_0, C_0 = self.dC_init(Ss[0], ψs[0], ψini, batch)
         grad += G_0.reshape(-1, 1) @ g_qt[:, 0].reshape(1, -1)
         loss *= C_0
-        if time_products is not None:
-            time_products[0] *= C_0
         
         ## other terms 
         for k in range(self.K):
@@ -222,18 +235,33 @@ class sNQS_rbm:
                 # grad += tc.outer(g_qt[:, k], G_prev)
                 grad += G_prev.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_prev
-                if time_products is not None:
-                    time_products[k] *= C_prev
+                if C_prev_by_time is not None:
+                    C_prev_by_time[k] = C_prev
             if G_next is not None:
                 # grad += tc.outer(g_qt[:, k], G_next)
                 grad += G_next.reshape(-1, 1) @ g_qt[:, k].reshape(1, -1)
                 loss *= C_next
-                if time_products is not None:
-                    time_products[k] *= C_next
+                if C_next_by_time is not None:
+                    C_next_by_time[k] = C_next
         loss = np.abs(1. - loss)
-        if time_products is not None:
-            return grad, loss, np.abs(1. - time_products)
+        if C_prev_by_time is not None and C_next_by_time is not None:
+            return grad, loss, self._loss_by_time_from_link_products(C_0, C_prev_by_time, C_next_by_time)
         return grad, loss
+
+    def _loss_by_time_from_link_products(
+        self,
+        C0: complex,
+        C_prev_by_time: list[complex | None],
+        C_next_by_time: list[complex | None],
+    ) -> np.ndarray:
+        loss_by_time = np.full(self.K, np.nan, dtype=np.float64)
+        loss_by_time[0] = float(np.abs(1.0 - C0))
+        for k in range(self.K - 1):
+            C_next = C_next_by_time[k]
+            C_prev = C_prev_by_time[k + 1]
+            if C_next is not None and C_prev is not None:
+                loss_by_time[k + 1] = float(np.abs(1.0 - C_next * C_prev))
+        return loss_by_time
     
     @tc.no_grad()
     def dC_init(self, S0:tc.Tensor, ψ0:RBM, ψinit:RBM, batch:int) -> tuple[tc.Tensor, float]:
@@ -451,7 +479,8 @@ class sNQS_rbm:
         self._validate_exact_backend_size()
         grad = tc.zeros_like(self.θ_jq, device=self.device)
         loss = 1.0 + 0.0j
-        time_products = np.ones(self.K, dtype=np.complex128) if return_time_losses else None
+        C_prev_by_time = [None] * self.K if return_time_losses else None
+        C_next_by_time = [None] * self.K if return_time_losses else None
 
         psiinit_s = rbm_state_vector(ψini, self.exact_basis)
         psi_vecs = [rbm_state_vector(ψk, self.exact_basis) for ψk in ψs]
@@ -459,8 +488,6 @@ class sNQS_rbm:
         G0, C0 = self.dC_init_exact(ψs[0], psi_vecs[0], ψini, psiinit_s)
         grad += G0.reshape(-1, 1) @ self.g_qt[:, 0].reshape(1, -1)
         loss *= C0
-        if time_products is not None:
-            time_products[0] *= C0
 
         for k in range(self.K):
             psi_km1_s = psi_vecs[k - 1] if k > 0 else None
@@ -478,17 +505,50 @@ class sNQS_rbm:
             if G_prev is not None:
                 grad += G_prev.reshape(-1, 1) @ self.g_qt[:, k].reshape(1, -1)
                 loss *= C_prev
-                if time_products is not None:
-                    time_products[k] *= C_prev
+                if C_prev_by_time is not None:
+                    C_prev_by_time[k] = C_prev
             if G_next is not None:
                 grad += G_next.reshape(-1, 1) @ self.g_qt[:, k].reshape(1, -1)
                 loss *= C_next
-                if time_products is not None:
-                    time_products[k] *= C_next
+                if C_next_by_time is not None:
+                    C_next_by_time[k] = C_next
 
-        if time_products is not None:
-            return grad, float(np.abs(1.0 - loss)), np.abs(1.0 - time_products)
+        if C_prev_by_time is not None and C_next_by_time is not None:
+            return grad, float(np.abs(1.0 - loss)), self._loss_by_time_from_link_products(C0, C_prev_by_time, C_next_by_time)
         return grad, float(np.abs(1.0 - loss))
+
+    def exact_link_fidelity_loss(self, ψini: RBM, ψs: list[RBM]) -> tuple[tc.Tensor, np.ndarray]:
+        self._validate_exact_backend_size()
+        psiinit_s = rbm_state_vector(ψini, self.exact_basis).detach()
+        psi_vecs = [rbm_state_vector(ψk, self.exact_basis) for ψk in ψs]
+
+        one = tc.tensor(1.0, dtype=tc.float64, device=self.device)
+        losses = []
+
+        psi0_s = psi_vecs[0]
+        init_overlap = (psiinit_s.conj() * psi0_s).sum()
+        init_den = psiinit_s.abs().square().sum() * psi0_s.abs().square().sum()
+        F0 = init_overlap.abs().square() / init_den.real
+        losses.append(one - F0.real)
+
+        for k in range(self.K - 1):
+            prop_s = self._exact_forward_state(psi_vecs[k], link_idx=k)
+            target_s = psi_vecs[k + 1]
+            overlap = (target_s.conj() * prop_s).sum()
+            den = prop_s.abs().square().sum() * target_s.abs().square().sum()
+            F = overlap.abs().square() / den.real
+            losses.append(one - F.real)
+
+        loss_by_time_t = tc.stack(losses)
+        return loss_by_time_t.mean(), loss_by_time_t.detach().cpu().numpy()
+
+    def _exact_forward_state(self, psi_s: tc.Tensor, *, link_idx: int) -> tc.Tensor:
+        if self.scheme == "taylor":
+            return self._exact_taylor_state(psi_s, dagger=False)
+        if self.scheme == "lpe":
+            coeff = (-1j * self.Δt) * tc.as_tensor(self.a_links[link_idx], dtype=tc.complex128, device=self.device)
+            return self._exact_lpe_state(psi_s, coeff)
+        raise ValueError("Unsupported scheme.")
     
     @tc.no_grad()
     def dC_init_exact(self, ψ0: RBM, psi0_s: tc.Tensor, ψinit: RBM, psiinit_s: tc.Tensor) -> tuple[tc.Tensor, complex]:

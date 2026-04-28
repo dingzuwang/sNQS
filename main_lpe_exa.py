@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2026-04-21 04:04:09
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-27 22:41:50
+# @Last Modified time: 2026-04-28 10:21:22
 
 import numpy as np
 import torch as tc
@@ -21,9 +21,9 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 def main() -> None:
     scheme = "lpe"
     backend = "exact"
-    t0, tK = 0.0, 0.2
-    dt = 0.02
-    order = 2
+    t0, tK = 0.0, 0.4
+    dt = 0.1
+    order = 4
 
     model = TIM(J=-1.0, hx=-0.3, hz=-0.3)
     Lx, Ly = 10, 1
@@ -31,7 +31,7 @@ def main() -> None:
     α = 3
     Q = 8
     steps = 500
-    lr = 1.0e-4
+    lr = 1.0e-3
     loss_log_interval = 100
 
     M = 500
@@ -82,6 +82,7 @@ def main() -> None:
         steps=steps,
         lr=lr,
         log_interval=loss_log_interval,
+        objective="link_fidelity",
         return_time_losses=True,
     )
 
@@ -177,7 +178,7 @@ def main() -> None:
     sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     fig_loss.colorbar(sm, ax=ax_loss, label="Epoch")
     ax_loss.set_xlabel("Time")
-    ax_loss.set_ylabel("Local loss by time point")
+    ax_loss.set_ylabel("Normalized link loss ending at time point")
     ax_loss.set_yscale("log")
     ax_loss.set_xlim(loss_t_plot.min(), loss_t_plot.max())
     fig_loss.tight_layout()

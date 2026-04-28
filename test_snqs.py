@@ -303,6 +303,47 @@ def test_sNQS_rbm_exact_train_returns_time_losses_when_requested() -> None:
     assert isinstance(ψfinal, RBM)
 
 
+def test_sNQS_rbm_exact_train_link_fidelity_objective_smoke() -> None:
+    Δt = 0.02
+    N = 3
+    α = 1
+    Q = 2
+    t = np.array([0.0, 0.1, 0.2])
+    g_qt = get_g_qt(t, Q, device, basis_type="simple")
+    θ_jq = random_θ_jq(Q, N, α, device=device)
+    ψini = RBM(random_θ(N, α, device), N=N, α=α)
+    snqs = sNQS_rbm(
+        θ_jq,
+        g_qt,
+        Lx=N,
+        Ly=1,
+        α=α,
+        Δt=Δt,
+        model=TIM(J=-1.0, hx=-0.25, hz=0.15),
+        backend="exact",
+        max_exact_spins=8,
+    )
+
+    θ_out, Ss, losses, losses_by_time, ψfinal = snqs.train(
+        ψini,
+        Sini=None,
+        batch=1,
+        steps=2,
+        lr=1.0e-3,
+        log_interval=1,
+        objective="link_fidelity",
+        return_time_losses=True,
+    )
+
+    assert θ_out.shape == θ_jq.shape
+    assert Ss is None
+    assert losses.shape == (2,)
+    assert losses_by_time.shape == (2, snqs.K)
+    assert np.isfinite(losses).all()
+    assert np.isfinite(losses_by_time).all()
+    assert isinstance(ψfinal, RBM)
+
+
 def test_sNQS_rbm_exact_lpe_grad_matches_dense_formula() -> None:
     Δt = 0.1
     N = 3
