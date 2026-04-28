@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2026-04-21 04:04:09
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-28 10:21:22
+# @Last Modified time: 2026-04-28 10:31:06
 
 import numpy as np
 import torch as tc
@@ -22,16 +22,16 @@ def main() -> None:
     scheme = "lpe"
     backend = "exact"
     t0, tK = 0.0, 0.4
-    dt = 0.1
-    order = 4
+    dt = 0.01
+    order = 2
 
     model = TIM(J=-1.0, hx=-0.3, hz=-0.3)
     Lx, Ly = 10, 1
     N = Lx * Ly
     α = 3
     Q = 8
-    steps = 500
-    lr = 1.0e-3
+    steps = 1000
+    lr = 1.0e-4
     loss_log_interval = 100
 
     M = 500
