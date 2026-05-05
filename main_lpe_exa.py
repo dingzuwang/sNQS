@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2026-04-21 04:04:09
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-05-05 22:15:42
+# @Last Modified time: 2026-05-05 22:22:13
 
 import numpy as np
 import torch as tc
@@ -21,8 +21,8 @@ device = "cuda" if tc.cuda.is_available() else "cpu"
 def main() -> None:
     scheme = "lpe"
     backend = "exact"
-    t0, tK = 0.0, 0.4
-    dt = 0.05
+    t0, tK = 0.0, 0.2
+    dt = 0.02
     order = 4
 
     model = TIM(J=-1.0, hx=-0.3, hz=-0.3)
@@ -30,7 +30,7 @@ def main() -> None:
     N = Lx * Ly
     α = 3
     Q = 4
-    steps = 4000
+    steps = 2000
     lr = 1.0e-3
     loss_log_interval = 100
 
