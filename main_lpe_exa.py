@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2026-04-21 04:04:09
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-04-28 10:31:06
+# @Last Modified time: 2026-05-05 22:15:42
 
 import numpy as np
 import torch as tc
@@ -22,16 +22,16 @@ def main() -> None:
     scheme = "lpe"
     backend = "exact"
     t0, tK = 0.0, 0.4
-    dt = 0.01
-    order = 2
+    dt = 0.05
+    order = 4
 
     model = TIM(J=-1.0, hx=-0.3, hz=-0.3)
     Lx, Ly = 10, 1
     N = Lx * Ly
     α = 3
-    Q = 8
-    steps = 1000
-    lr = 1.0e-4
+    Q = 4
+    steps = 4000
+    lr = 1.0e-3
     loss_log_interval = 100
 
     M = 500
@@ -75,7 +75,7 @@ def main() -> None:
     print(f"Running sNQS_rbm with scheme={scheme}, backend={backend}...")
     print(f"a_ms: {a_ms}")
     print(f"t_nodes: {t_nodes.detach().cpu().numpy()}")
-    θ_jq, Ss, losses, losses_by_time, _ = snqs.train(
+    θ_jq, Ss, losses, _ = snqs.train(
         ψini,
         Sini=None if backend == "exact" else S_rand,
         batch=batch,
@@ -83,7 +83,7 @@ def main() -> None:
         lr=lr,
         log_interval=loss_log_interval,
         objective="link_fidelity",
-        return_time_losses=True,
+        return_time_losses=False,
     )
 
     E, Sx, Sz = snqs.expectation_value(Ss, batch=20 * batch)
@@ -142,7 +142,7 @@ def main() -> None:
     ax = fig.add_subplot(1, 4, 4)
     ax.plot(losses, ".-")
     ax.set_xlim(0, steps)
-    ax.set_ylim(1.0e-4, max(losses) * 1.1)
+    ax.set_ylim(min(losses), max(losses) * 1.1)
     ax.set_xlabel("Training step")
     ax.set_ylabel("Loss")
     ax.set_yscale("log")
@@ -151,46 +151,46 @@ def main() -> None:
     plt.savefig("results_lpe_exa.png", dpi=300, bbox_inches="tight")
     print("Saved summary figure to results_lpe_exa.png")
 
-    fig_loss, ax_loss = plt.subplots(figsize=(6.4, 3.6))
-    loss_t_plot = t_nodes.detach().cpu().real.numpy()
-    time_loss_epochs = np.arange(1, losses_by_time.shape[0] + 1)
-    snapshot_mask = (
-        (time_loss_epochs == 1)
-        | (time_loss_epochs % loss_log_interval == 0)
-        | (time_loss_epochs == steps)
-    )
-    snapshot_idx = np.flatnonzero(snapshot_mask)
-    cmap = plt.get_cmap("viridis")
-    denom = max(1, snapshot_idx.size - 1)
-    for curve_idx, loss_idx in enumerate(snapshot_idx):
-        color = cmap(curve_idx / denom)
-        ax_loss.plot(
-            loss_t_plot,
-            np.maximum(losses_by_time[loss_idx], 1.0e-16),
-            ".-",
-            linewidth=1.0,
-            markersize=3.0,
-            color=color,
-        )
-    for t_phy in loss_t_plot[phy_idx]:
-        ax_loss.axvline(t_phy, color="0.85", linewidth=0.5, zorder=0)
-    norm = plt.Normalize(vmin=time_loss_epochs[snapshot_idx[0]], vmax=time_loss_epochs[snapshot_idx[-1]])
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    fig_loss.colorbar(sm, ax=ax_loss, label="Epoch")
-    ax_loss.set_xlabel("Time")
-    ax_loss.set_ylabel("Normalized link loss ending at time point")
-    ax_loss.set_yscale("log")
-    ax_loss.set_xlim(loss_t_plot.min(), loss_t_plot.max())
-    fig_loss.tight_layout()
-    fig_loss.savefig("results_lpe_exa_time_losses.png", dpi=300, bbox_inches="tight")
-    # np.savez(
-    #     "results_lpe_exa_time_losses.npz",
-    #     t_nodes=loss_t_plot,
-    #     phy_idx=np.array(phy_idx, dtype=int),
-    #     epochs=time_loss_epochs,
-    #     losses_by_time=losses_by_time,
+    # fig_loss, ax_loss = plt.subplots(figsize=(6.4, 3.6))
+    # loss_t_plot = t_nodes.detach().cpu().real.numpy()
+    # time_loss_epochs = np.arange(1, losses_by_time.shape[0] + 1)
+    # snapshot_mask = (
+    #     (time_loss_epochs == 1)
+    #     | (time_loss_epochs % loss_log_interval == 0)
+    #     | (time_loss_epochs == steps)
     # )
-    print("Saved time-resolved loss figure to results_lpe_exa_time_losses.png")
+    # snapshot_idx = np.flatnonzero(snapshot_mask)
+    # cmap = plt.get_cmap("viridis")
+    # denom = max(1, snapshot_idx.size - 1)
+    # for curve_idx, loss_idx in enumerate(snapshot_idx):
+    #     color = cmap(curve_idx / denom)
+    #     ax_loss.plot(
+    #         loss_t_plot,
+    #         np.maximum(losses_by_time[loss_idx], 1.0e-16),
+    #         ".-",
+    #         linewidth=1.0,
+    #         markersize=3.0,
+    #         color=color,
+    #     )
+    # for t_phy in loss_t_plot[phy_idx]:
+    #     ax_loss.axvline(t_phy, color="0.85", linewidth=0.5, zorder=0)
+    # norm = plt.Normalize(vmin=time_loss_epochs[snapshot_idx[0]], vmax=time_loss_epochs[snapshot_idx[-1]])
+    # sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    # fig_loss.colorbar(sm, ax=ax_loss, label="Epoch")
+    # ax_loss.set_xlabel("Time")
+    # ax_loss.set_ylabel("Normalized link loss ending at time point")
+    # ax_loss.set_yscale("log")
+    # ax_loss.set_xlim(loss_t_plot.min(), loss_t_plot.max())
+    # fig_loss.tight_layout()
+    # fig_loss.savefig("results_lpe_exa_time_losses.png", dpi=300, bbox_inches="tight")
+    # # np.savez(
+    # #     "results_lpe_exa_time_losses.npz",
+    # #     t_nodes=loss_t_plot,
+    # #     phy_idx=np.array(phy_idx, dtype=int),
+    # #     epochs=time_loss_epochs,
+    # #     losses_by_time=losses_by_time,
+    # # )
+    # print("Saved time-resolved loss figure to results_lpe_exa_time_losses.png")
 
 
 

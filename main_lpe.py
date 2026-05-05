@@ -2,7 +2,7 @@
 # @Author: dzwang
 # @Date:   2025-09-14 19:50:39
 # @Last Modified by:   dzwang
-# @Last Modified time: 2026-03-30 21:34:06
+# @Last Modified time: 2026-04-28 10:39:09
 import numpy as np
 import torch as tc
 from model import TIM
@@ -15,10 +15,10 @@ device = "cuda:0" if tc.cuda.is_available() else "cpu"
 
 
 def main() -> None:
-    tI = 0.1  # time interval
+    tI = 0.2  # time interval
     tW = 2.0  # time window
-    dt = 0.0001 # time step
-    order = 1 # order of LPE scheme
+    dt = 0.01 # time step
+    order = 2 # order of LPE scheme
     ## get ground state
     print("-"*20)
     print("Getting initial state...")
